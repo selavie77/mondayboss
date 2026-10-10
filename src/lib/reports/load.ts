@@ -1,6 +1,7 @@
 import { getSession } from "@/lib/workspace";
-import { buildIncomeStatement, buildNetCashFlow } from "./build";
-import { describeRange, periodColumns, type ReportParams } from "./params";
+import { buildBalanceSheet, buildIncomeStatement, buildNetCashFlow, buildTrialBalance } from "./build";
+import { buildLedger, type LedgerAccount, type LedgerGroup, type LedgerLine } from "./ledger";
+import { AS_OF_REPORTS, describeRange, periodColumns, type ReportParams } from "./params";
 import type { AccountInfo, ActivityRow, Column, ReportData } from "./types";
 
 const PAGE = 1000;
@@ -34,16 +35,33 @@ export async function selectProperties(property: string) {
   return { all, selected: all, label: "All Properties", filtered: false };
 }
 
-/** Load the data for an income statement or net cash flow report and build it. */
-export async function loadReport(params: ReportParams): Promise<ReportData> {
-  const { supabase } = await getSession();
-  const { selected, label, filtered } = await selectProperties(params.property);
+type SupabaseServer = Awaited<ReturnType<typeof getSession>>["supabase"];
+type ActivityResult = { bucket: string; property_id: string | null; account_id: string; net_cents: number | string };
 
-  const entityIds = [...new Set(selected.map((p) => p.entity_id))];
-  const { data: acc } = entityIds.length
-    ? await supabase.from("accounts").select("id, parent_id, code, name, type, subtype, is_bank").in("entity_id", entityIds)
-    : { data: [] };
-  const accounts: AccountInfo[] = (acc ?? []).map((a) => ({
+/** Read every page of the report_activity query (the API returns at most one page per call). */
+async function fetchActivity(
+  supabase: SupabaseServer,
+  o: { from: string; to: string; group: string; propertyIds: string[] | null },
+): Promise<ActivityResult[]> {
+  const rows: ActivityResult[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .rpc("report_activity", { p_from: o.from, p_to: o.to, p_group: o.group, p_property_ids: o.propertyIds })
+      .range(from, from + PAGE - 1);
+    if (error) throw new Error(error.message);
+    rows.push(...((data ?? []) as ActivityResult[]));
+    if ((data?.length ?? 0) < PAGE) break;
+  }
+  return rows;
+}
+
+async function fetchAccounts(supabase: SupabaseServer, entityIds: string[]): Promise<AccountInfo[]> {
+  if (entityIds.length === 0) return [];
+  const { data } = await supabase
+    .from("accounts")
+    .select("id, parent_id, code, name, type, subtype, is_bank")
+    .in("entity_id", entityIds);
+  return (data ?? []).map((a) => ({
     id: a.id,
     parentId: a.parent_id,
     code: a.code,
@@ -52,52 +70,186 @@ export async function loadReport(params: ReportParams): Promise<ReportData> {
     subtype: a.subtype,
     isBank: a.is_bank,
   }));
+}
 
-  // The report query returns at most one page per call, so read every page.
-  type Row = { bucket: string; property_id: string | null; account_id: string; net_cents: number | string };
-  const rows: Row[] = [];
-  for (let from = 0; entityIds.length > 0; from += PAGE) {
-    const { data, error } = await supabase
-      .rpc("report_activity", {
-        p_from: params.from,
-        p_to: params.to,
-        p_group: params.columns,
-        p_property_ids: filtered ? selected.map((p) => p.id) : null,
-      })
-      .range(from, from + PAGE - 1);
-    if (error) throw new Error(error.message);
-    rows.push(...((data ?? []) as Row[]));
-    if ((data?.length ?? 0) < PAGE) break;
-  }
+const longDate = (d: string) =>
+  new Date(d + "T00:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
 
-  const byProperty = params.columns === "property";
+/** Load the data for a report and build it: income statement, net cash flow, balance sheet or trial balance. */
+export async function loadReport(params: ReportParams): Promise<ReportData> {
+  const { supabase } = await getSession();
+  const { selected, label, filtered } = await selectProperties(params.property);
+  const asOf = AS_OF_REPORTS.includes(params.report);
+
+  const entityIds = [...new Set(selected.map((p) => p.entity_id))];
+  const accounts = await fetchAccounts(supabase, entityIds);
+
+  // Point-in-time reports add up everything from the beginning to the as-of date.
+  const from = asOf ? "1900-01-01" : params.from;
+  const grouping =
+    params.report === "trial-balance"
+      ? "total"
+      : params.report === "balance-sheet"
+        ? params.columns === "property"
+          ? "property"
+          : "total"
+        : params.columns;
+
+  const rows =
+    entityIds.length > 0
+      ? await fetchActivity(supabase, { from, to: params.to, group: grouping, propertyIds: filtered ? selected.map((p) => p.id) : null })
+      : [];
+
   const activity: ActivityRow[] = rows.map((r) => ({
-    columnKey: byProperty ? (r.property_id ?? "unassigned") : r.bucket,
+    columnKey: grouping === "property" ? (r.property_id ?? "unassigned") : r.bucket,
     accountId: r.account_id,
     netCents: Number(r.net_cents),
   }));
 
   let columns: Column[];
-  if (params.columns === "property") {
+  if (grouping === "property") {
     columns = selected.map((p) => ({ key: p.id, label: p.name }));
     if (activity.some((a) => a.columnKey === "unassigned")) {
       columns.push({ key: "unassigned", label: "Not assigned to a property" });
     }
-  } else if (params.columns === "total") {
+  } else if (grouping === "total") {
     columns = [{ key: "all", label: "Total" }];
   } else {
-    columns = periodColumns(params.from, params.to, params.columns);
+    columns = periodColumns(params.from, params.to, grouping as "month" | "quarter" | "year");
+  }
+
+  let firstEntryDate: string | undefined;
+  if (params.report === "balance-sheet") {
+    const { data } = await supabase.from("journal_entries").select("entry_date").order("entry_date").limit(1);
+    firstEntryDate = data?.[0]?.entry_date ?? undefined;
   }
 
   const input = {
     accounts,
     activity,
     columns,
-    subtitle: describeRange(params.from, params.to),
-    options: { detail: params.detail, showTotal: params.columns !== "total" },
+    subtitle: asOf ? `As of ${longDate(params.to)}` : describeRange(params.from, params.to),
+    options: { detail: params.detail, showTotal: grouping !== "total" },
+    context: { filtered, firstEntryDate },
   };
-  const data = params.report === "net-cash-flow" ? buildNetCashFlow(input) : buildIncomeStatement(input);
+  const data =
+    params.report === "net-cash-flow"
+      ? buildNetCashFlow(input)
+      : params.report === "balance-sheet"
+        ? buildBalanceSheet(input)
+        : params.report === "trial-balance"
+          ? buildTrialBalance(input)
+          : buildIncomeStatement(input);
   return { ...data, title: `${data.title} for ${label}` };
+}
+
+export interface LedgerReport {
+  title: string;
+  subtitle: string;
+  groups: LedgerGroup[];
+  accountOptions: { code: string; name: string }[];
+  /** True when more lines matched than were loaded. */
+  truncated: boolean;
+  lineCount: number;
+}
+
+const LEDGER_LINE_CAP = 5000;
+
+const dayBefore = (d: string) => {
+  const t = new Date(d + "T00:00:00Z");
+  t.setUTCDate(t.getUTCDate() - 1);
+  return t.toISOString().slice(0, 10);
+};
+
+/** Journal lines by account for the period, with opening balances and running balances. */
+export async function loadLedger(params: ReportParams): Promise<LedgerReport> {
+  const { supabase } = await getSession();
+  const { selected, label, filtered } = await selectProperties(params.property);
+  const entityIds = [...new Set(selected.map((p) => p.entity_id))];
+  const accountsInfo = await fetchAccounts(supabase, entityIds);
+  const propertyIds = filtered ? selected.map((p) => p.id) : null;
+
+  const options = [...new Map(accountsInfo.map((a) => [a.code, { code: a.code, name: a.name }])).values()].sort((a, b) =>
+    a.code.localeCompare(b.code, undefined, { numeric: true }),
+  );
+
+  const chosen = accountsInfo.filter((a) => params.account === "all" || a.code === params.account);
+  const byId = new Map(accountsInfo.map((a) => [a.id, a]));
+  const ledgerAccounts: LedgerAccount[] = chosen.map((a) => ({
+    id: a.id,
+    code: a.code,
+    name: a.name,
+    type: a.type,
+    parentName: a.parentId ? (byId.get(a.parentId)?.name ?? null) : null,
+  }));
+
+  // Opening balances: balance-sheet accounts carry forward; income and expense restart each January.
+  const opening = new Map<string, number>();
+  if (entityIds.length > 0) {
+    const before = dayBefore(params.from);
+    const yearStart = `${params.from.slice(0, 4)}-01-01`;
+    const carried = await fetchActivity(supabase, { from: "1900-01-01", to: before, group: "total", propertyIds });
+    for (const r of carried) {
+      const t = byId.get(r.account_id)?.type;
+      if (t && t !== "income" && t !== "expense") opening.set(r.account_id, Number(r.net_cents));
+    }
+    if (params.from > yearStart) {
+      const ytd = await fetchActivity(supabase, { from: yearStart, to: before, group: "total", propertyIds });
+      for (const r of ytd) {
+        const t = byId.get(r.account_id)?.type;
+        if (t === "income" || t === "expense") opening.set(r.account_id, Number(r.net_cents));
+      }
+    }
+  }
+
+  const propertyName = new Map(selected.map((p) => [p.id, p.name]));
+  const lines: LedgerLine[] = [];
+  let truncated = false;
+  const ids = chosen.map((a) => a.id);
+  for (let from = 0; ids.length > 0; from += PAGE) {
+    let q = supabase
+      .from("journal_lines")
+      .select("id, account_id, property_id, debit_cents, credit_cents, memo, journal_entries!inner(entry_date, memo, created_at)")
+      .gte("journal_entries.entry_date", params.from)
+      .lte("journal_entries.entry_date", params.to)
+      .in("account_id", ids)
+      .order("id")
+      .range(from, from + PAGE - 1);
+    if (filtered) {
+      q = q.in(
+        "property_id",
+        selected.map((p) => p.id),
+      );
+    }
+    const { data, error } = await q;
+    if (error) throw new Error(error.message);
+    for (const l of data ?? []) {
+      const e = l.journal_entries as unknown as { entry_date: string; memo: string | null; created_at: string };
+      lines.push({
+        accountId: l.account_id,
+        date: e.entry_date,
+        order: `${e.created_at}|${l.id}`,
+        description: l.memo || e.memo || "",
+        property: l.property_id ? (propertyName.get(l.property_id) ?? "") : "",
+        debitCents: Number(l.debit_cents),
+        creditCents: Number(l.credit_cents),
+      });
+    }
+    if (lines.length >= LEDGER_LINE_CAP) {
+      truncated = (data?.length ?? 0) === PAGE;
+      break;
+    }
+    if ((data?.length ?? 0) < PAGE) break;
+  }
+
+  return {
+    title: `General Ledger for ${label}`,
+    subtitle: describeRange(params.from, params.to),
+    groups: buildLedger(ledgerAccounts, lines, opening),
+    accountOptions: options,
+    truncated,
+    lineCount: lines.length,
+  };
 }
 
 export interface CapexRow {

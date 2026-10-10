@@ -4,12 +4,14 @@ import { useRouter } from "next/navigation";
 import { useTransition } from "react";
 import { Download, Printer } from "lucide-react";
 import { Input, Select } from "@/components/ui";
-import { toQuery, type ReportParams } from "@/lib/reports/params";
+import { AS_OF_REPORTS, toQuery, type ReportParams } from "@/lib/reports/params";
 
 export interface FilterOptions {
   properties: { id: string; name: string }[];
   portfolios: { id: string; name: string }[];
   years: number[];
+  /** General ledger only: accounts that can be picked. */
+  accounts?: { code: string; name: string }[];
 }
 
 const label = "mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted";
@@ -17,12 +19,19 @@ const label = "mb-1 block text-[11px] font-semibold uppercase tracking-wide text
 export function ReportControls({ params, options }: { params: ReportParams; options: FilterOptions }) {
   const router = useRouter();
   const [pending, start] = useTransition();
-  const isCapex = params.report === "capital-expenses";
+
+  const kind = params.report;
+  const asOf = AS_OF_REPORTS.includes(kind);
+  const isLedger = kind === "general-ledger";
+  const showColumns = kind === "income-statement" || kind === "net-cash-flow" || kind === "balance-sheet";
+  const showDetail = showColumns;
+  const showCents = kind !== "capital-expenses" && !isLedger;
 
   const go = (patch: Partial<ReportParams>) =>
     start(() => router.replace(`/reports/${params.report}?${toQuery({ ...params, ...patch }, false)}`, { scroll: false }));
 
   const year = options.years.find((y) => params.from === `${y}-01-01` && params.to === `${y}-12-31`);
+  const yearEnd = options.years.find((y) => params.to === `${y}-12-31`);
   const exportHref = (format: string) => `/reports/export?${toQuery(params)}&format=${format}`;
 
   return (
@@ -56,64 +65,114 @@ export function ReportControls({ params, options }: { params: ReportParams; opti
         </Select>
       </div>
 
-      <div>
-        <label className={label} htmlFor="f-year">
-          Period
-        </label>
-        <div className="flex items-center gap-1.5">
-          <Select
-            compact
-            id="f-year"
-            className="w-[5.5rem]"
-            value={year ?? "custom"}
-            onChange={(e) => {
-              const y = e.target.value;
-              if (y !== "custom") go({ from: `${y}-01-01`, to: `${y}-12-31` });
-            }}
-          >
-            {options.years.map((y) => (
-              <option key={y} value={y}>
-                {y}
+      {asOf ? (
+        <div>
+          <label className={label} htmlFor="f-asof">
+            As of
+          </label>
+          <div className="flex items-center gap-1.5">
+            <Select
+              compact
+              id="f-asof"
+              className="w-36"
+              value={yearEnd ? String(yearEnd) : "custom"}
+              onChange={(e) => {
+                const y = e.target.value;
+                if (y !== "custom") go({ to: `${y}-12-31` });
+              }}
+            >
+              {options.years.map((y) => (
+                <option key={y} value={y}>
+                  Dec 31, {y}
+                </option>
+              ))}
+              <option value="custom">Custom date</option>
+            </Select>
+            <Input compact type="date" aria-label="As of date" className="w-[8.75rem]" value={params.to} onChange={(e) => e.target.value && go({ to: e.target.value })} />
+          </div>
+        </div>
+      ) : (
+        <div>
+          <label className={label} htmlFor="f-year">
+            Period
+          </label>
+          <div className="flex items-center gap-1.5">
+            <Select
+              compact
+              id="f-year"
+              className="w-[5.5rem]"
+              value={year ?? "custom"}
+              onChange={(e) => {
+                const y = e.target.value;
+                if (y !== "custom") go({ from: `${y}-01-01`, to: `${y}-12-31` });
+              }}
+            >
+              {options.years.map((y) => (
+                <option key={y} value={y}>
+                  {y}
+                </option>
+              ))}
+              <option value="custom">Custom</option>
+            </Select>
+            <Input compact type="date" aria-label="From" className="w-[8.75rem]" value={params.from} onChange={(e) => e.target.value && go({ from: e.target.value })} />
+            <span className="text-muted" aria-hidden>
+              –
+            </span>
+            <Input compact type="date" aria-label="To" className="w-[8.75rem]" value={params.to} onChange={(e) => e.target.value && go({ to: e.target.value })} />
+          </div>
+        </div>
+      )}
+
+      {isLedger && (
+        <div className="w-full sm:w-64">
+          <label className={label} htmlFor="f-account">
+            Account
+          </label>
+          <Select compact id="f-account" value={params.account} onChange={(e) => go({ account: e.target.value })}>
+            <option value="all">All accounts</option>
+            {(options.accounts ?? []).map((a) => (
+              <option key={a.code} value={a.code}>
+                {a.code} · {a.name}
               </option>
             ))}
-            <option value="custom">Custom</option>
           </Select>
-          <Input compact type="date" aria-label="From" className="w-[8.75rem]" value={params.from} onChange={(e) => e.target.value && go({ from: e.target.value })} />
-          <span className="text-muted" aria-hidden>
-            –
-          </span>
-          <Input compact type="date" aria-label="To" className="w-[8.75rem]" value={params.to} onChange={(e) => e.target.value && go({ to: e.target.value })} />
         </div>
-      </div>
+      )}
 
-      {!isCapex && (
-        <>
-          <div>
-            <label className={label} htmlFor="f-columns">
-              Columns
-            </label>
-            <Select compact id="f-columns" className="w-36" value={params.columns} onChange={(e) => go({ columns: e.target.value as ReportParams["columns"] })}>
-              <option value="property">By property</option>
-              <option value="month">By month</option>
-              <option value="quarter">By quarter</option>
-              <option value="year">By year</option>
-              <option value="total">Total only</option>
-            </Select>
-          </div>
-          <div>
-            <label className={label} htmlFor="f-detail">
-              Detail
-            </label>
-            <Select compact id="f-detail" className="w-40" value={params.detail} onChange={(e) => go({ detail: e.target.value as ReportParams["detail"] })}>
-              <option value="sub">By subcategory</option>
-              <option value="category">By category</option>
-            </Select>
-          </div>
-          <label className="inline-flex h-9 items-center gap-2 text-sm text-muted">
-            <input type="checkbox" checked={params.cents} onChange={(e) => go({ cents: e.target.checked })} className="h-4 w-4 accent-[var(--brand-600)]" />
-            Show cents
+      {showColumns && (
+        <div>
+          <label className={label} htmlFor="f-columns">
+            Columns
           </label>
-        </>
+          <Select compact id="f-columns" className="w-36" value={params.columns} onChange={(e) => go({ columns: e.target.value as ReportParams["columns"] })}>
+            <option value="property">By property</option>
+            {kind !== "balance-sheet" && (
+              <>
+                <option value="month">By month</option>
+                <option value="quarter">By quarter</option>
+                <option value="year">By year</option>
+              </>
+            )}
+            <option value="total">Total only</option>
+          </Select>
+        </div>
+      )}
+      {showDetail && (
+        <div>
+          <label className={label} htmlFor="f-detail">
+            Detail
+          </label>
+          <Select compact id="f-detail" className="w-40" value={params.detail} onChange={(e) => go({ detail: e.target.value as ReportParams["detail"] })}>
+            <option value="sub">By subcategory</option>
+            <option value="category">By category</option>
+          </Select>
+        </div>
+      )}
+      {showCents && (
+        <label className="inline-flex h-9 items-center gap-2 text-sm text-muted">
+          <input type="checkbox" checked={params.cents} onChange={(e) => go({ cents: e.target.checked })} className="h-4 w-4 accent-[var(--brand-600)]" />
+          Show cents
+        </label>
       )}
 
       <details className="relative ml-auto">

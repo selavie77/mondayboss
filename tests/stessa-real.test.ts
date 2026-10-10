@@ -5,7 +5,8 @@ import type { PGlite } from "@electric-sql/pglite";
 import { parseStessaLedger } from "@/lib/import/stessa";
 import { planStessaImport, type ImportPlan } from "@/lib/import/stessaEntries";
 import { formatCents } from "@/lib/money";
-import { buildIncomeStatement, buildNetCashFlow } from "@/lib/reports/build";
+import { buildBalanceSheet, buildIncomeStatement, buildNetCashFlow, buildTrialBalance } from "@/lib/reports/build";
+import { buildLedger } from "@/lib/reports/ledger";
 import type { AccountInfo, ActivityRow, ReportData } from "@/lib/reports/types";
 import { freshDb, seedEntity } from "./db";
 
@@ -131,5 +132,43 @@ describe.skipIf(!available)("real Stessa 2021 ledgers", () => {
       const i = props.findIndex((p) => p.id === c.property_id);
       expect(change[i]).toBe(Number(c.net));
     }
+  });
+  it("the trial balance, balance sheet and general ledger agree with each other", async () => {
+    const accts = (await db.query<{ id: string; parent_id: string | null; code: string; name: string; type: AccountInfo["type"]; subtype: string | null; is_bank: boolean }>(
+      `select id, parent_id, code, name, type, subtype, is_bank from accounts`)).rows;
+    const accounts: AccountInfo[] = accts.map((a) => ({ id: a.id, parentId: a.parent_id, code: a.code, name: a.name, type: a.type, subtype: a.subtype, isBank: a.is_bank }));
+    const act = (await db.query<{ account_id: string; net_cents: string | number }>(
+      `select account_id, net_cents from report_activity('1900-01-01', '2021-12-31', 'total')`)).rows;
+    const activity: ActivityRow[] = act.map((r) => ({ columnKey: "all", accountId: r.account_id, netCents: Number(r.net_cents) }));
+    const input = { accounts, activity, columns: [{ key: "all", label: "Total" }], subtitle: "", options: { detail: "sub" as const, showTotal: false } };
+
+    // Trial balance: every cent of debit has a matching credit.
+    const tb = buildTrialBalance(input);
+    const total = tb.rows.find((r) => r.label === "TOTAL")!.values!;
+    expect(total[0]).toBe(total[1]);
+    expect(tb.notes?.[0].tone).toBe("ok");
+
+    // Balance sheet: assets = liabilities + equity (including profit to date).
+    const bs = buildBalanceSheet(input);
+    const val = (label: string) => bs.rows.find((r) => r.label === label)!.values![0]!;
+    expect(val("TOTAL ASSETS")).toBe(val("TOTAL LIABILITIES & EQUITY"));
+    expect(bs.notes?.[0].tone).toBe("ok");
+
+    // General ledger: each account's closing balance equals its trial-balance balance (natural direction).
+    const lines = (await db.query<{ account_id: string; d: string | number; c: string | number; date: string; created: string; id: string }>(
+      `select l.account_id, l.debit_cents d, l.credit_cents c, to_char(e.entry_date, 'YYYY-MM-DD') as date, e.created_at::text created, l.id
+         from journal_lines l join journal_entries e on e.id = l.entry_id`)).rows;
+    const ledgerAccounts = accounts.map((a) => ({ id: a.id, code: a.code, name: a.name, type: a.type, parentName: null }));
+    const groups = buildLedger(
+      ledgerAccounts,
+      lines.map((l) => ({ accountId: l.account_id, date: l.date, order: `${l.created}|${l.id}`, description: "", property: "", debitCents: Number(l.d), creditCents: Number(l.c) })),
+      new Map(),
+    );
+    for (const g of groups) {
+      const net = Number(act.find((r) => r.account_id === g.account.id)?.net_cents ?? 0);
+      const natural = g.account.type === "asset" || g.account.type === "expense" ? net : -net;
+      expect(g.closingCents).toBe(natural);
+    }
+    expect(groups.length).toBeGreaterThan(5);
   });
 });

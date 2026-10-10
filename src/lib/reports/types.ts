@@ -41,9 +41,16 @@ export interface ReportRow {
   values?: (number | null)[];
 }
 
+export interface ReportNote {
+  tone: "ok" | "warn" | "info";
+  text: string;
+}
+
 export interface ReportData {
   title: string;
   subtitle: string;
+  /** Short messages shown above the table (e.g. "Debits equal credits"). */
+  notes?: ReportNote[];
   columns: string[];
   rows: ReportRow[];
   empty: boolean;
@@ -56,5 +63,11 @@ export interface BuildOptions {
   showTotal: boolean;
 }
 
-export type ReportKind = "income-statement" | "net-cash-flow" | "capital-expenses";
+export type ReportKind =
+  | "income-statement"
+  | "net-cash-flow"
+  | "capital-expenses"
+  | "balance-sheet"
+  | "trial-balance"
+  | "general-ledger";
 export type ColumnGrouping = "property" | "month" | "quarter" | "year" | "total";

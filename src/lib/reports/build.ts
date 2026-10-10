@@ -1,9 +1,11 @@
 import type {
   AccountInfo,
+  AccountType,
   ActivityRow,
   BuildOptions,
   Column,
   ReportData,
+  ReportNote,
   ReportRow,
 } from "./types";
 
@@ -13,6 +15,8 @@ interface Input {
   columns: Column[];
   options: BuildOptions;
   subtitle: string;
+  /** Extra facts the point-in-time reports mention in their notes. */
+  context?: { filtered?: boolean; firstEntryDate?: string };
 }
 
 type Vec = number[];
@@ -242,4 +246,118 @@ export function buildNetCashFlow(input: Input): ReportData {
   r.line("NET CHANGE IN CASH", add(ncf, transfers), "grand");
 
   return finish("Net Cash Flow", input, r);
+}
+
+const longDate = (d: string) =>
+  new Date(d + "T00:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+
+export function buildBalanceSheet(input: Input): ReportData {
+  const L = new Ledger(input.accounts, input.activity, input.columns);
+  const r = new Report(L.n, input.options);
+
+  r.heading("ASSETS");
+  const assets = r.categories(L.categories((a) => a.type === "asset"), 1);
+  r.summary("TOTAL ASSETS", assets);
+  r.gap();
+
+  r.heading("LIABILITIES");
+  const liabilities = r.categories(L.categories((a) => a.type === "liability"), -1);
+  r.summary("TOTAL LIABILITIES", liabilities);
+  r.gap();
+
+  r.heading("EQUITY");
+  const contributed = r.categories(L.categories((a) => a.type === "equity"), -1);
+  // Books are not closed to retained earnings, so profit to date is shown as its own line.
+  const profit = scale(L.sum((a) => a.type === "income" || a.type === "expense"), -1);
+  if (!isZero(profit)) r.line("Net income to date", profit, "line");
+  const equity = add(contributed, profit);
+  r.summary("TOTAL EQUITY", equity, "total");
+  r.gap();
+
+  const liabilitiesAndEquity = add(liabilities, equity);
+  r.line("TOTAL LIABILITIES & EQUITY", liabilitiesAndEquity, "grand");
+
+  const out = sub(assets, liabilitiesAndEquity);
+  const notes: ReportNote[] = [];
+  if (isZero(out)) {
+    notes.push({ tone: "ok", text: "Assets equal liabilities plus equity. The balance sheet balances." });
+  } else {
+    notes.push({
+      tone: "warn",
+      text: input.context?.filtered
+        ? "Filtering by property can leave a balance sheet out of balance when an entry spans several properties."
+        : "Assets do not equal liabilities plus equity. Check your entries.",
+    });
+  }
+  if (input.context?.firstEntryDate) {
+    notes.push({
+      tone: "info",
+      text: `Based on the entries recorded in Mondayboss, starting ${longDate(input.context.firstEntryDate)}. Balances from before then, such as property cost and loan balances, are not included until you add opening balances.`,
+    });
+  }
+  const data = finish("Balance Sheet", input, r);
+  return { ...data, notes };
+}
+
+const TYPE_ORDER: AccountType[] = ["asset", "liability", "equity", "income", "expense"];
+const TYPE_HEADING: Record<AccountType, string> = {
+  asset: "ASSETS",
+  liability: "LIABILITIES",
+  equity: "OWNER EQUITY",
+  income: "INCOME",
+  expense: "EXPENSES",
+};
+
+/** One column of activity (cumulative to the as-of date) turned into debit and credit balances. */
+export function buildTrialBalance(input: Input): ReportData {
+  const L = new Ledger(input.accounts, input.activity, input.columns);
+  const byId = new Map(input.accounts.map((a) => [a.id, a]));
+  const rows: ReportRow[] = [];
+  let debits = 0;
+  let credits = 0;
+
+  for (const type of TYPE_ORDER) {
+    const accts = input.accounts
+      .filter((a) => a.type === type && L.net(a.id)[0] !== 0)
+      .sort((x, y) => x.code.localeCompare(y.code, undefined, { numeric: true }));
+    if (accts.length === 0) continue;
+
+    const heading = TYPE_HEADING[type];
+    rows.push({ kind: "heading", label: heading, section: heading });
+    let d = 0;
+    let c = 0;
+    for (const a of accts) {
+      const net = L.net(a.id)[0];
+      const parent = a.parentId ? byId.get(a.parentId) : undefined;
+      const debit = net > 0 ? net : 0;
+      const credit = net < 0 ? -net : 0;
+      d += debit;
+      c += credit;
+      rows.push({
+        kind: "line",
+        label: `${a.code}  ${parent ? `${parent.name} › ` : ""}${a.name}`,
+        values: [debit, credit],
+        section: heading,
+      });
+    }
+    debits += d;
+    credits += c;
+    rows.push({ kind: "total", label: `Total ${heading.toLowerCase()}`, values: [d, c], section: heading, summary: true });
+    rows.push({ kind: "gap", label: "" });
+  }
+  rows.push({ kind: "grand", label: "TOTAL", values: [debits, credits] });
+
+  const notes: ReportNote[] = [];
+  const diff = debits - credits;
+  if (diff === 0) {
+    notes.push({ tone: "ok", text: "Debits equal credits. Your books are in balance." });
+  } else {
+    notes.push({
+      tone: "warn",
+      text: input.context?.filtered
+        ? "Filtering by property can leave the trial balance out of balance when an entry spans several properties."
+        : `Debits and credits differ by ${(Math.abs(diff) / 100).toLocaleString("en-US", { style: "currency", currency: "USD" })}. Check your entries.`,
+    });
+  }
+  return { title: "Trial Balance", subtitle: input.subtitle, notes, columns: ["Debit", "Credit"], rows, empty: rows.length <= 1 };
 }

@@ -9,6 +9,8 @@ export interface ReportParams {
   columns: ColumnGrouping;
   detail: "category" | "sub";
   cents: boolean;
+  /** General ledger only: "all" or an account code. */
+  account: string;
 }
 
 export const REPORTS: { kind: ReportKind; label: string; description: string }[] = [
@@ -27,7 +29,25 @@ export const REPORTS: { kind: ReportKind; label: string; description: string }[]
     label: "Capital Expenses",
     description: "Schedule of acquisitions and improvements, with when each was placed in service and its useful life.",
   },
+  {
+    kind: "balance-sheet",
+    label: "Balance Sheet",
+    description: "What you own and what you owe at a point in time, from your double-entry books.",
+  },
+  {
+    kind: "trial-balance",
+    label: "Trial Balance",
+    description: "Every account's debit and credit balance, proving that your books balance.",
+  },
+  {
+    kind: "general-ledger",
+    label: "General Ledger",
+    description: "Every journal entry line by account, with running balances.",
+  },
 ];
+
+/** Reports that describe a single date ("as of") instead of a period. */
+export const AS_OF_REPORTS: ReportKind[] = ["balance-sheet", "trial-balance"];
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
@@ -57,6 +77,7 @@ export function parseParams(
     columns,
     detail: one(sp.detail) === "category" ? "category" : "sub",
     cents: one(sp.cents) === "1",
+    account: one(sp.account) || "all",
   };
 }
 
@@ -70,6 +91,7 @@ export function toQuery(p: ReportParams, includeReport = true): string {
   });
   if (includeReport) q.set("report", p.report);
   if (p.cents) q.set("cents", "1");
+  if (p.account !== "all") q.set("account", p.account);
   return q.toString();
 }
 

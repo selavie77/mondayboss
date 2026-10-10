@@ -1,6 +1,6 @@
 import ExcelJS from "exceljs";
 import type { NextRequest } from "next/server";
-import { loadCapex, loadReport } from "@/lib/reports/load";
+import { loadCapex, loadLedger, loadReport } from "@/lib/reports/load";
 import { parseParams } from "@/lib/reports/params";
 
 type Cell = string | number | null;
@@ -39,6 +39,21 @@ export async function GET(request: NextRequest) {
         { style: "grand", cells: ["TOTAL CAPITAL EXPENSES", null, null, c.rows.reduce((s, r) => s + r.amountCents, 0) / 100] },
       ],
     };
+  } else if (params.report === "general-ledger") {
+    const g = await loadLedger(params);
+    const rows: Sheet["rows"] = [];
+    for (const grp of g.groups) {
+      rows.push({ style: "heading", cells: [`${grp.account.code}  ${grp.account.parentName ? `${grp.account.parentName} › ` : ""}${grp.account.name}`] });
+      rows.push({ style: "plain", cells: [null, "Opening balance", null, null, null, grp.openingCents / 100] });
+      for (const e of grp.entries) {
+        rows.push({
+          style: "plain",
+          cells: [e.date, e.description, e.property, e.debitCents ? e.debitCents / 100 : null, e.creditCents ? e.creditCents / 100 : null, e.balanceCents / 100],
+        });
+      }
+      rows.push({ style: "total", cells: [null, "Closing balance", null, grp.debitsCents / 100, grp.creditsCents / 100, grp.closingCents / 100] });
+    }
+    sheet = { title: g.title, subtitle: g.subtitle, header: ["Date", "Description", "Property", "Debit", "Credit", "Balance"], moneyFrom: 3, rows };
   } else {
     const r = await loadReport(params);
     sheet = {
@@ -84,7 +99,7 @@ export async function GET(request: NextRequest) {
     c.border = { bottom: { style: "thin" } };
   });
 
-  const money = params.cents || params.report === "capital-expenses" ? '#,##0.00;(#,##0.00);"–"' : '#,##0;(#,##0);"–"';
+  const money = params.cents || params.report === "capital-expenses" || params.report === "general-ledger" ? '#,##0.00;(#,##0.00);"–"' : '#,##0;(#,##0);"–"';
   for (const r of sheet.rows) {
     const row = ws.addRow(r.cells);
     if (r.style === "heading") row.font = { bold: true, color: { argb: "FF145F5A" } };

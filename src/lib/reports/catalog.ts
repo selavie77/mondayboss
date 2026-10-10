@@ -53,21 +53,21 @@ export const CATALOG: CatalogItem[] = [
     name: "Balance Sheet",
     description: "What you own and what you owe at a point in time, from your double-entry books.",
     category: "accounting",
-    available: false,
+    available: true,
   },
   {
     key: "trial-balance",
     name: "Trial Balance",
     description: "Every account's debit and credit balance, proving that your books balance.",
     category: "accounting",
-    available: false,
+    available: true,
   },
   {
     key: "general-ledger",
     name: "General Ledger",
     description: "Every journal entry line by account, with running balances.",
     category: "accounting",
-    available: false,
+    available: true,
   },
 ];
 

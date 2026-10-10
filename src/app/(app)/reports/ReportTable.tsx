@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown } from "lucide-react";
+import { AlertCircle, CheckCircle2, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Info } from "lucide-react";
 import { formatAmount } from "@/lib/money";
 import type { ReportData, ReportRow } from "@/lib/reports/types";
 
@@ -81,6 +81,22 @@ export function ReportTable({ data, cents }: { data: ReportData; cents: boolean 
           </div>
         )}
       </div>
+
+      {data.notes && data.notes.length > 0 && (
+        <ul className="mb-3 space-y-1.5" aria-label="Notes">
+          {data.notes.map((n, i) => (
+            <li
+              key={i}
+              className={`flex items-start gap-2 rounded-xl px-3.5 py-2 text-[13px] ${
+                n.tone === "ok" ? "bg-brand-50 text-brand-900" : n.tone === "warn" ? "bg-warning-bg text-warning-fg" : "bg-background text-muted"
+              }`}
+            >
+              {n.tone === "ok" ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" aria-hidden /> : n.tone === "warn" ? <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden /> : <Info className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />}
+              {n.text}
+            </li>
+          ))}
+        </ul>
+      )}
 
       {data.empty ? (
         <div className="rounded-2xl border border-dashed border-border-strong bg-surface p-10 text-center">
