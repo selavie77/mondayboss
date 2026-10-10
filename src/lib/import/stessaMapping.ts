@@ -28,6 +28,20 @@ export const CODES = {
 export const SUB_SEP = "::";
 export const acctKey = (code: string, sub?: string | null) => (sub ? `${code}${SUB_SEP}${sub}` : code);
 
+/** Plain-English descriptions for subcategories created from Stessa sub-categories. */
+export const SUB_DESCRIPTIONS: Record<string, string> = {
+  "Eviction Fees": "Court and filing costs for evicting a tenant.",
+  "HVAC Repairs": "Heating and cooling repairs.",
+  "Plumbing Repairs": "Leaks, clogs, water heaters and other plumbing fixes.",
+  Labor: "Hired labor for repairs and maintenance.",
+  "Electrical Repairs": "Wiring, outlets, fixtures and other electrical fixes.",
+  "Roof Repairs": "Patching and repairing a roof. A full replacement is usually an improvement, not a repair.",
+  "Tax Licenses & Registrations": "Rental licenses, registrations and permits.",
+  "Water & Sewer": "Water and sewer charges for the property.",
+  Electric: "Electric service for the property.",
+  "Bank Fees": "Monthly account, wire and similar bank fees.",
+};
+
 export interface Mapped {
   /** Account on the other side of cash (cash is debited for money in, credited for money out). */
   counterCode: string;

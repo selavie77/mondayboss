@@ -57,6 +57,15 @@ export function AddCategory({
           required
         />
       </div>
+      <div className="w-full">
+        <Input
+          name="description"
+          aria-label="Description"
+          placeholder="What is this for? (optional)"
+          maxLength={400}
+          className="h-10 text-sm"
+        />
+      </div>
       {wantsTaxLine && (
         <div className="w-full sm:w-64">
           <Select name="tax_line" aria-label="Schedule E line" defaultValue="" className="h-10 text-sm">

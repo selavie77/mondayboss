@@ -213,3 +213,25 @@ describe("category hierarchy", () => {
     await expect(db.query(`select create_account($1, null, 'expense', 'Repairs')`, [s.ent])).rejects.toThrow();
   });
 });
+
+describe("category descriptions", () => {
+  it("gives every default account a description", async () => {
+    const fresh = (await db.query<{ id: string }>(
+      `insert into entities (workspace_id, name) values ($1, 'Fresh LLC') returning id`, [s.ws])).rows[0].id;
+    await db.query(`select seed_default_chart($1)`, [fresh]);
+    const r = await db.query(`select count(*)::int n, count(description)::int d from accounts where entity_id = $1`, [fresh]);
+    expect(r.rows[0]).toMatchObject({ n: 29, d: 29 });
+  });
+
+  it("stores a description on custom categories and subcategories", async () => {
+    const cat = (await db.query<{ id: string }>(
+      `select create_account($1, null, 'expense', 'Snow Removal', null, 'Plowing and salting in winter.') as id`, [s.ent])).rows[0].id;
+    const sub = (await db.query<{ id: string }>(
+      `select ensure_subaccount($1, 'Salt', 'Ice melt for walkways.') as id`, [cat])).rows[0].id;
+    const r = await db.query(`select id, description from accounts where id in ($1, $2) order by code`, [cat, sub]);
+    expect(r.rows.map((x) => (x as { description: string }).description)).toEqual([
+      "Plowing and salting in winter.",
+      "Ice melt for walkways.",
+    ]);
+  });
+});

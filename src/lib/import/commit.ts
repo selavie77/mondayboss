@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ImportPlan, DraftEntry, UnresolvedRow } from "./stessaEntries";
-import { SUB_SEP } from "./stessaMapping";
+import { SUB_DESCRIPTIONS, SUB_SEP } from "./stessaMapping";
 
 export interface CommitOptions {
   workspaceId: string;
@@ -47,7 +47,11 @@ export async function commitImportPlan(supabase: SupabaseClient, o: CommitOption
     const [code, name] = key.split(SUB_SEP);
     const parentId = o.accountIds.get(code);
     if (!parentId) throw new Error(`No account ${code} for subcategory "${name}"`);
-    const made = await supabase.rpc("ensure_subaccount", { p_parent_id: parentId, p_name: name });
+    const made = await supabase.rpc("ensure_subaccount", {
+      p_parent_id: parentId,
+      p_name: name,
+      p_description: SUB_DESCRIPTIONS[name] ?? null,
+    });
     if (made.error) throw made.error;
     o.accountIds.set(key, made.data as string);
   }

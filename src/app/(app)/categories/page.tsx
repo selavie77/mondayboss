@@ -4,6 +4,7 @@ import { Card } from "@/components/ui";
 import { getSession } from "@/lib/workspace";
 import { taxLineLabel } from "@/lib/taxLines";
 import { AddCategory } from "./AddCategory";
+import { EditDescription } from "./EditDescription";
 
 export const metadata: Metadata = { title: "Categories" };
 
@@ -25,7 +26,7 @@ export default async function CategoriesPage({ searchParams }: PageProps<"/categ
   const { data: accounts } = entity
     ? await supabase
         .from("accounts")
-        .select("id, parent_id, code, name, type, tax_line, is_bank")
+        .select("id, parent_id, code, name, type, tax_line, is_bank, description")
         .eq("entity_id", entity.id)
         .eq("is_active", true)
         .order("code")
@@ -97,12 +98,22 @@ export default async function CategoriesPage({ searchParams }: PageProps<"/categ
                                 <span className="rounded-full bg-border px-2.5 py-0.5 text-xs font-medium text-muted">Bank</span>
                               )}
                             </div>
+                            <div className="ml-[3.75rem] mt-1">
+                              {p.description && <p className="max-w-2xl text-sm text-muted">{p.description}</p>}
+                              <EditDescription id={p.id} value={p.description} />
+                            </div>
                             {children.length > 0 && (
                               <ul className="ml-[3.75rem] mt-2 space-y-1.5 border-l-2 border-brand-100 pl-4">
                                 {children.map((c) => (
-                                  <li key={c.id} className="flex items-center gap-3 text-[15px]">
-                                    <span className="num w-14 shrink-0 text-[13px] text-subtle">{c.code}</span>
-                                    {c.name}
+                                  <li key={c.id} className="text-[15px]">
+                                    <div className="flex items-center gap-3">
+                                      <span className="num w-14 shrink-0 text-[13px] text-subtle">{c.code}</span>
+                                      {c.name}
+                                    </div>
+                                    <div className="ml-[4.25rem]">
+                                      {c.description && <p className="max-w-2xl text-sm text-muted">{c.description}</p>}
+                                      <EditDescription id={c.id} value={c.description} />
+                                    </div>
                                   </li>
                                 ))}
                               </ul>
