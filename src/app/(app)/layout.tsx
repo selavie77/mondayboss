@@ -4,7 +4,11 @@ import { signOut } from "../(auth)/actions";
 import { Nav } from "./Nav";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
-  const { user, workspaceName } = await getSession();
+  const { supabase, user, workspaceName } = await getSession();
+  const { count: reviewCount } = await supabase
+    .from("statement_lines")
+    .select("id", { count: "exact", head: true })
+    .eq("status", "pending");
 
   return (
     <div className="min-h-screen lg:grid lg:grid-cols-[17rem_1fr]">
@@ -12,7 +16,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         <div className="flex items-center justify-between px-5 py-4 lg:py-6">
           <Logo />
         </div>
-        <Nav />
+        <Nav reviewCount={reviewCount ?? 0} />
         <div className="hidden border-t border-border p-4 lg:mt-auto lg:block">
           <p className="truncate text-sm font-medium">{workspaceName}</p>
           <p className="truncate text-[13px] text-muted">{user.email}</p>

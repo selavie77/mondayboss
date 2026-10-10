@@ -34,8 +34,15 @@ describe.skipIf(!available)("real Stessa 2021 ledgers", () => {
     db = await freshDb();
     const s = await seedEntity(db);
     const accountIds = new Map<string, string>();
-    for (const code of new Set(plan.entries.flatMap((e) => e.lines.map((l) => l.accountCode)))) {
-      accountIds.set(code, await s.acct(code));
+    const posting = [...plan.entries, ...plan.review]; // review rows are posted here only to total the P&L
+    for (const key of new Set(posting.flatMap((e) => e.lines.map((l) => l.accountCode)))) {
+      const [code, sub] = key.split("::");
+      if (!sub) {
+        accountIds.set(key, await s.acct(code));
+      } else {
+        const made = await db.query<{ id: string }>(`select ensure_subaccount($1, $2) as id`, [await s.acct(code), sub]);
+        accountIds.set(key, made.rows[0].id);
+      }
     }
     const propIds = new Map<string, string>();
     for (const l of ledgers) {
@@ -44,7 +51,7 @@ describe.skipIf(!available)("real Stessa 2021 ledgers", () => {
         [s.ws, s.pf, s.ent, l.propertyName]);
       propIds.set(l.propertyName, r.rows[0].id);
     }
-    for (const e of plan.entries) {
+    for (const e of posting) {
       const lines = e.lines.map((l) => ({
         account_id: accountIds.get(l.accountCode),
         property_id: propIds.get(l.property),
@@ -56,7 +63,7 @@ describe.skipIf(!available)("real Stessa 2021 ledgers", () => {
   });
 
   it("parses every transaction and posts balanced entries", async () => {
-    expect(rowCount).toBe(plan.entries.length + plan.unresolved.length);
+    expect(rowCount).toBe(plan.entries.length + plan.review.length + plan.unresolved.length);
     const tb = await db.query(`select sum(debit_cents)::bigint d, sum(credit_cents)::bigint c from trial_balance`);
     const r = tb.rows[0] as { d: bigint | number; c: bigint | number };
     expect(Number(r.d)).toBe(Number(r.c));
@@ -64,19 +71,20 @@ describe.skipIf(!available)("real Stessa 2021 ledgers", () => {
 
   it("reports a Schedule E style summary and the unresolved items", async () => {
     const pnl = await db.query(
-      `select coalesce(tax_line,'(none)') line, name, sum(amount_cents)::bigint amt
-         from property_pnl_monthly group by tax_line, name order by tax_line, name`);
+      `select coalesce(tax_line,'(none)') line, category_name as name, sum(amount_cents)::bigint amt
+         from property_pnl_monthly group by tax_line, category_name order by tax_line, category_name`);
     const lines = (pnl.rows as { line: string; name: string; amt: bigint | number }[])
       .map((r) => `${r.line.padEnd(34)} ${r.name.padEnd(28)} ${formatCents(Number(r.amt)).padStart(12)}`);
     const byReason = new Map<string, number>();
     for (const u of plan.unresolved) byReason.set(u.reason, (byReason.get(u.reason) ?? 0) + 1);
     const review = new Map<string, number>();
-    for (const e of plan.entries) for (const w of e.warnings) review.set(w, (review.get(w) ?? 0) + 1);
+    for (const e of plan.review) for (const w of e.warnings) review.set(w, (review.get(w) ?? 0) + 1);
 
     console.log(["\n=== P&L by Schedule E line (all 8 properties, 2021) ===", ...lines,
       "\n=== Unresolved (not posted) ===", ...[...byReason].map(([k, v]) => `${v} x ${k}`),
       "\n=== Posted but flagged for review ===", ...[...review].map(([k, v]) => `${v} x ${k}`),
       `\nposted ${plan.entries.length} entries, unresolved ${plan.unresolved.length}`].join("\n"));
     expect(plan.entries.length).toBeGreaterThan(500);
+    expect(plan.review.length).toBeGreaterThan(0);
   });
 });

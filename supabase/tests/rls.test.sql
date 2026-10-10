@@ -6,8 +6,8 @@ insert into auth.users (id, email, raw_user_meta_data) values
   ('aaaaaaaa-0000-0000-0000-000000000001', 'a@example.com', '{}'::jsonb),
   ('bbbbbbbb-0000-0000-0000-000000000002', 'b@example.com', '{}'::jsonb);
 
-select is((select count(*)::int from workspaces), 2, 'each sign-up creates a workspace');
-select is((select count(*)::int from portfolios), 2, 'each sign-up creates a default portfolio');
+select is((select count(*)::int from workspaces where created_by in ('aaaaaaaa-0000-0000-0000-000000000001','bbbbbbbb-0000-0000-0000-000000000002')), 2, 'each sign-up creates a workspace');
+select is((select count(*)::int from portfolios p join workspaces w on w.id = p.workspace_id where w.created_by in ('aaaaaaaa-0000-0000-0000-000000000001','bbbbbbbb-0000-0000-0000-000000000002')), 2, 'each sign-up creates a default portfolio');
 
 -- User A creates an entity and posts an entry.
 create temp table ctx as

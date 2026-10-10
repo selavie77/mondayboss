@@ -58,7 +58,7 @@ export default async function MondayPage({ searchParams }: PageProps<"/monday">)
     attention.push({ title: "Add your first property", detail: "Properties are where income and expenses are tracked.", href: "/properties", cta: "Add property" });
   }
   if ((pending.count ?? 0) > 0) {
-    attention.push({ title: `${pending.count} transactions are waiting for review`, detail: "Categorize them so they reach your books.", href: "#", cta: "Review" });
+    attention.push({ title: `${pending.count} transactions are waiting for review`, detail: "Confirm or change the category so they reach your books.", href: "/review", cta: "Review" });
   }
   if ((entries.count ?? 0) > 0 && (recons.count ?? 0) === 0) {
     attention.push({ title: "Reconcile your accounts", detail: "Compare your books to a bank statement to prove they're right.", href: "#", cta: "Start" });

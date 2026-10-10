@@ -13,6 +13,7 @@ import { existsSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { parseStessaLedger } from "../src/lib/import/stessa";
 import { planStessaImport } from "../src/lib/import/stessaEntries";
+import { commitImportPlan } from "../src/lib/import/commit";
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!;
@@ -70,12 +71,6 @@ async function main() {
   }
   const entityId = entity.id as string;
 
-  const existing = await supabase.from("journal_entries").select("id", { count: "exact", head: true }).eq("entity_id", entityId);
-  if ((existing.count ?? 0) > 0) {
-    console.log(`Entity already has ${existing.count} journal entries; nothing to do. Run \`npx supabase db reset\` to start over.`);
-    return;
-  }
-
   const ledgers = await Promise.all(files.map((f) => parseStessaLedger(f)));
   const plan = planStessaImport(ledgers);
 
@@ -85,6 +80,11 @@ async function main() {
 
   const props = new Map<string, string>();
   for (const l of ledgers) {
+    const found = await supabase.from("properties").select("id").eq("name", l.propertyName).maybeSingle();
+    if (found.data) {
+      props.set(l.propertyName, found.data.id);
+      continue;
+    }
     const ins = await supabase
       .from("properties")
       .insert({ workspace_id: workspaceId, portfolio_id: portfolio!.id, entity_id: entityId, name: l.propertyName })
@@ -94,26 +94,18 @@ async function main() {
     props.set(l.propertyName, ins.data.id);
   }
 
-  let posted = 0;
-  for (const e of plan.entries) {
-    const lines = e.lines.map((l) => ({
-      account_id: accounts.get(l.accountCode),
-      property_id: props.get(l.property),
-      debit_cents: l.debitCents,
-      credit_cents: l.creditCents,
-    }));
-    const r = await supabase.rpc("post_entry", {
-      p_entity_id: entityId,
-      p_entry_date: e.date,
-      p_memo: e.memo,
-      p_lines: lines,
-      p_source: "import",
-    });
-    if (r.error) throw new Error(`${e.date} ${e.memo}: ${r.error.message}`);
-    posted += 1;
-  }
-
-  console.log(`Loaded ${ledgers.length} properties, posted ${posted} entries, ${plan.unresolved.length} unresolved rows skipped.`);
+  const result = await commitImportPlan(supabase, {
+    workspaceId,
+    entityId,
+    source: "Stessa general ledger",
+    filename: files.map((f) => path.basename(path.dirname(f))).join(", "),
+    plan,
+    accountIds: accounts,
+    propertyIds: props,
+  });
+  console.log(
+    `${ledgers.length} properties: ${result.imported} rows imported (${result.posted} posted, ${result.pending} waiting for review), ${result.duplicates} already imported.`,
+  );
 }
 
 main().catch((e) => {

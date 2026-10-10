@@ -108,3 +108,108 @@ describe("property P&L view", () => {
     expect((r.rows[0] as { a: number }).a).toBe(105000);
   });
 });
+
+describe("review queue", () => {
+  const stage = async (amountCents: number, description = "Mortgage payment") => {
+    const batch = (await db.query<{ id: string }>(
+      `insert into import_batches (workspace_id, entity_id, source) values ($1,$2,'test') returning id`, [s.ws, s.ent])).rows[0].id;
+    const hash = Math.random().toString(36);
+    return (await db.query<{ id: string }>(
+      `insert into statement_lines (workspace_id, entity_id, batch_id, property_id, txn_date, description, amount_cents, dedupe_hash)
+       values ($1,$2,$3,$4,'2021-08-01',$5,$6,$7) returning id`,
+      [s.ws, s.ent, batch, s.prop, description, amountCents, hash])).rows[0].id;
+  };
+
+  it("posts a split payment (principal / interest / escrow) from one pending line", async () => {
+    const id = await stage(-55760);
+    const lines = [
+      { account_id: await s.acct("2100"), property_id: s.prop, debit_cents: 10400 },
+      { account_id: await s.acct("5070"), property_id: s.prop, debit_cents: 24297 },
+      { account_id: await s.acct("1100"), property_id: s.prop, debit_cents: 21063 },
+      { account_id: await s.acct("1000"), property_id: s.prop, credit_cents: 55760 },
+    ];
+    await db.query(`select post_statement_line($1, $2::jsonb)`, [id, JSON.stringify(lines)]);
+    const r = await db.query(`select status, journal_entry_id is not null as linked from statement_lines where id = $1`, [id]);
+    expect(r.rows[0]).toMatchObject({ status: "posted", linked: true });
+  });
+
+  it("rejects lines that do not add up to the transaction amount", async () => {
+    const id = await stage(-10000);
+    const lines = [
+      { account_id: await s.acct("5090"), debit_cents: 9999 },
+      { account_id: await s.acct("1000"), credit_cents: 9999 },
+    ];
+    await expect(db.query(`select post_statement_line($1, $2::jsonb)`, [id, JSON.stringify(lines)])).rejects.toThrow(/Lines total/);
+  });
+
+  it("will not post the same line twice", async () => {
+    const id = await stage(-5000);
+    const lines = [
+      { account_id: await s.acct("5090"), debit_cents: 5000 },
+      { account_id: await s.acct("1000"), credit_cents: 5000 },
+    ];
+    await db.query(`select post_statement_line($1, $2::jsonb)`, [id, JSON.stringify(lines)]);
+    await expect(db.query(`select post_statement_line($1, $2::jsonb)`, [id, JSON.stringify(lines)])).rejects.toThrow(/already posted/);
+  });
+
+  it("accepts proposed categorizations in bulk", async () => {
+    const a = await stage(-1200, "Lawn care");
+    const b = await stage(-3400, "Faucet");
+    for (const id of [a, b]) {
+      await db.query(
+        `update statement_lines set proposed_debit_account_id = $2, proposed_credit_account_id = $3 where id = $1`,
+        [id, await s.acct("5090"), await s.acct("1000")]);
+    }
+    const n = await db.query(`select accept_statement_lines($1::uuid[]) as n`, [[a, b]]);
+    expect((n.rows[0] as { n: number }).n).toBe(2);
+  });
+});
+
+describe("category hierarchy", () => {
+  it("creates a subcategory that inherits its category's type and rolls up in reports", async () => {
+    const parent = await s.acct("5090");
+    const subId = (await db.query<{ id: string }>(`select ensure_subaccount($1, 'Plumbing Repairs') as id`, [parent])).rows[0].id;
+    // Idempotent, case-insensitive.
+    const again = (await db.query<{ id: string }>(`select ensure_subaccount($1, 'plumbing repairs') as id`, [parent])).rows[0].id;
+    expect(again).toBe(subId);
+
+    await post([
+      { account_id: subId, property_id: s.prop, debit_cents: 30000 },
+      { account_id: parent, property_id: s.prop, debit_cents: 12000 },
+      { account_id: await s.acct("1000"), credit_cents: 42000 },
+    ], "2021-09-01");
+
+    const r = await db.query(
+      `select category_name, tax_line, sum(amount_cents)::int as amt
+         from property_pnl_monthly where property_id = $1 and category_name = 'Repairs' group by category_name, tax_line`, [s.prop]);
+    // Subcategory and category amounts roll up under "Repairs", with the category's tax line.
+    expect(r.rows).toHaveLength(1);
+    expect(r.rows[0]).toMatchObject({ category_name: "Repairs", tax_line: "sched_e.repairs" });
+    expect((r.rows[0] as { amt: number }).amt).toBeGreaterThanOrEqual(42000);
+  });
+
+  it("generates codes for custom categories and subcategories", async () => {
+    const cat = (await db.query<{ id: string }>(
+      `select create_account($1, null, 'expense', 'Pest Control', 'sched_e.other') as id`, [s.ent])).rows[0].id;
+    const row = (await db.query(`select code, tax_line from accounts where id = $1`, [cat])).rows[0] as { code: string; tax_line: string };
+    expect(row.code).toMatch(/^5\d{3}$/);
+    expect(row.tax_line).toBe("sched_e.other");
+    const subId = (await db.query<{ id: string }>(`select create_account($1, $2, 'expense', 'Termites') as id`, [s.ent, cat])).rows[0].id;
+    const sub = (await db.query(`select code, type from accounts where id = $1`, [subId])).rows[0] as { code: string; type: string };
+    expect(sub.code).toBe(`${row.code}.01`);
+    expect(sub.type).toBe("expense");
+  });
+
+  it("rejects a third level, a type mismatch, and duplicate sibling names", async () => {
+    const parent = await s.acct("5090");
+    const child = (await db.query<{ id: string }>(`select ensure_subaccount($1, 'HVAC Repairs') as id`, [parent])).rows[0].id;
+    await expect(db.query(`select create_account($1, $2, 'expense', 'Furnace')`, [s.ent, child])).rejects.toThrow(/two levels/);
+    // create_account takes the type from the parent; a direct insert with a different type is refused.
+    await expect(
+      db.query(
+        `insert into accounts (workspace_id, entity_id, code, name, type, parent_id) values ($1,$2,'9999','Odd','income',$3)`,
+        [s.ws, s.ent, parent]),
+    ).rejects.toThrow(/same type/);
+    await expect(db.query(`select create_account($1, null, 'expense', 'Repairs')`, [s.ent])).rejects.toThrow();
+  });
+});

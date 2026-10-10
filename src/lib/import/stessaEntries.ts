@@ -1,7 +1,8 @@
 import type { StessaLedger, StessaRow } from "./stessa";
-import { CODES, isUnresolved, mapStessaRow, signWarning } from "./stessaMapping";
+import { CODES, acctKey, isUnresolved, mapStessaRow, signWarning } from "./stessaMapping";
 
 export interface DraftLine {
+  /** Account key: a code, or "code::Subcategory" (see acctKey). */
   accountCode: string;
   property: string;
   debitCents: number;
@@ -9,9 +10,12 @@ export interface DraftLine {
 }
 
 export interface DraftEntry {
+  row: StessaRow;
   date: string;
   memo: string;
   dedupeHash: string;
+  debitCode: string;
+  creditCode: string;
   lines: DraftLine[];
   warnings: string[];
 }
@@ -22,17 +26,23 @@ export interface UnresolvedRow {
 }
 
 export interface ImportPlan {
+  /** Mapped cleanly: safe to post automatically. */
   entries: DraftEntry[];
+  /** Mapped, but something looked off. Held for a human to accept or change. */
+  review: DraftEntry[];
+  /** Could not be classified. Held for a human to categorize or split. */
   unresolved: UnresolvedRow[];
 }
 
 /**
  * Turn Stessa single-entry rows into balanced double-entry drafts.
  * Every row hits cash (1000) unless the mapping fixes both sides (e.g. tax paid from escrow).
- * Rows that cannot be classified are returned in `unresolved`, never guessed.
+ * Anything doubtful goes to `review` and anything unclassifiable to `unresolved`;
+ * neither is posted without a person's say-so.
  */
 export function planStessaImport(ledgers: StessaLedger[]): ImportPlan {
   const entries: DraftEntry[] = [];
+  const review: DraftEntry[] = [];
   const unresolved: UnresolvedRow[] = [];
 
   for (const ledger of ledgers) {
@@ -55,24 +65,28 @@ export function planStessaImport(ledgers: StessaLedger[]): ImportPlan {
       } else if (row.amountCents > 0) {
         // Money in: Dr cash, Cr counter.
         debitCode = CODES.cash;
-        creditCode = m.counterCode;
+        creditCode = acctKey(m.counterCode, m.sub);
       } else {
         // Money out: Dr counter, Cr cash.
-        debitCode = m.counterCode;
+        debitCode = acctKey(m.counterCode, m.sub);
         creditCode = CODES.cash;
       }
 
-      entries.push({
+      const entry: DraftEntry = {
+        row,
         date: row.date,
         memo: [row.name, row.notes].filter(Boolean).join(" - "),
         dedupeHash: row.dedupeHash,
+        debitCode,
+        creditCode,
         lines: [
           { accountCode: debitCode, property, debitCents: abs, creditCents: 0 },
           { accountCode: creditCode, property, debitCents: 0, creditCents: abs },
         ],
         warnings,
-      });
+      };
+      (warnings.length > 0 ? review : entries).push(entry);
     }
   }
-  return { entries, unresolved };
+  return { entries, review, unresolved };
 }

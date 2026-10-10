@@ -22,8 +22,10 @@ export async function updateSession(request: NextRequest) {
     },
   );
 
-  const { data } = await supabase.auth.getClaims();
-  const signedIn = Boolean(data?.claims);
+  // getUser() asks the auth server, so a cookie for a deleted user (e.g. after a local
+  // database reset) counts as signed out instead of bouncing between /login and /monday.
+  const { data } = await supabase.auth.getUser();
+  const signedIn = Boolean(data?.user);
   const path = request.nextUrl.pathname;
   const isPublic = PUBLIC_PATHS.some((p) => path.startsWith(p));
 

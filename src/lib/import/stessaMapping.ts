@@ -24,9 +24,15 @@ export const CODES = {
   otherExpense: "5140",
 } as const;
 
+/** Key for an account: a code ("5090"), or a subcategory under a category ("5090::Plumbing Repairs"). */
+export const SUB_SEP = "::";
+export const acctKey = (code: string, sub?: string | null) => (sub ? `${code}${SUB_SEP}${sub}` : code);
+
 export interface Mapped {
   /** Account on the other side of cash (cash is debited for money in, credited for money out). */
   counterCode: string;
+  /** Subcategory under `counterCode`, created on demand. Absent means the amount belongs to the category itself. */
+  sub?: string;
   /** Fixed debit/credit accounts that ignore the sign of the amount (non-cash movements). */
   fixed?: { debitCode: string; creditCode: string };
   /** Mapped, but a human should look at it. */
@@ -49,7 +55,7 @@ export function mapStessaRow(row: StessaRow): Mapped | Unresolved {
       if (sub === "Rents") return { counterCode: CODES.rent };
       if (sub === "Section 8 Rents") return { counterCode: CODES.section8 };
       if (sub === "Late Fees") return { counterCode: CODES.otherIncome };
-      return { counterCode: CODES.rent, review: "Income with no sub-category" };
+      return { counterCode: CODES.rent };
 
     case "Management Fees":
       if (sub === "Leasing Commissions") return { counterCode: CODES.commissions };
@@ -80,18 +86,19 @@ export function mapStessaRow(row: StessaRow): Mapped | Unresolved {
     case "Repairs & Maintenance":
       if (sub && REPAIRS_TO_CLEANING.has(sub)) return { counterCode: CODES.cleaning };
       if (sub && REPAIRS_TO_SUPPLIES.has(sub)) return { counterCode: CODES.supplies };
-      return { counterCode: CODES.repairs, review: sub ? undefined : "Repairs with no sub-category" };
+      return { counterCode: CODES.repairs, sub: sub ?? undefined };
 
+    // With no sub-category the amount simply belongs to the main category; totals roll up.
     case "Utilities":
-      return { counterCode: CODES.utilities };
+      return { counterCode: CODES.utilities, sub: sub ?? undefined };
     case "Insurance":
-      return { counterCode: CODES.insurance };
+      return { counterCode: CODES.insurance, sub: sub ?? undefined };
     case "Legal & Professional":
-      return { counterCode: CODES.professional };
+      return { counterCode: CODES.professional, sub: sub ?? undefined };
     case "Taxes":
-      return { counterCode: CODES.propertyTax };
+      return { counterCode: CODES.propertyTax, sub: sub ?? undefined };
     case "Admin & Other":
-      return { counterCode: CODES.otherExpense };
+      return { counterCode: CODES.otherExpense, sub: sub ?? undefined };
     case "Security Deposits":
       return { counterCode: CODES.deposits };
     default:

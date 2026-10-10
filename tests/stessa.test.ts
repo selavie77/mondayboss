@@ -21,7 +21,7 @@ describe("Stessa -> double-entry mapping", () => {
 
   it("books an expense as Dr expense / Cr cash", () => {
     const { entries } = plan(row({ category: "Utilities", subCategory: "Water & Sewer", amountCents: -2622 }));
-    expect(entries[0].lines[0]).toMatchObject({ accountCode: "5120", debitCents: 2622 });
+    expect(entries[0].lines[0]).toMatchObject({ accountCode: "5120::Water & Sewer", debitCents: 2622 });
     expect(entries[0].lines[1]).toMatchObject({ accountCode: "1000", creditCents: 2622 });
   });
 
@@ -31,12 +31,24 @@ describe("Stessa -> double-entry mapping", () => {
   });
 
   it("expenses property tax paid out of escrow: Dr property tax / Cr escrow, no cash", () => {
-    const { entries } = plan(row({
+    const { entries, review } = plan(row({
       category: "Transfers", subCategory: "General Escrow Payments", name: "Tax Disbursement",
       notes: "Tax Disbursement", amountCents: 137888,
     }));
-    expect(entries[0].lines[0]).toMatchObject({ accountCode: "5110", debitCents: 137888 });
-    expect(entries[0].lines[1]).toMatchObject({ accountCode: "1100", creditCents: 137888 });
+    expect(entries).toHaveLength(0); // held for review, not auto-posted
+    expect(review[0].lines[0]).toMatchObject({ accountCode: "5110", debitCents: 137888 });
+    expect(review[0].lines[1]).toMatchObject({ accountCode: "1100", creditCents: 137888 });
+  });
+
+  it("posts a row with no sub-category straight to the main category, with no review flag", () => {
+    const { entries, review } = plan(row({ category: "Repairs & Maintenance", subCategory: null, amountCents: -12000 }));
+    expect(review).toHaveLength(0);
+    expect(entries[0].lines[0]).toMatchObject({ accountCode: "5090", debitCents: 12000 });
+  });
+
+  it("keeps a real sub-category as a subcategory under its category", () => {
+    const { entries } = plan(row({ category: "Repairs & Maintenance", subCategory: "Plumbing Repairs", amountCents: -12000 }));
+    expect(entries[0].lines[0]).toMatchObject({ accountCode: "5090::Plumbing Repairs" });
   });
 
   it("refuses to guess an unsplit mortgage payment", () => {
@@ -46,13 +58,14 @@ describe("Stessa -> double-entry mapping", () => {
   });
 
   it("flags negative income for review", () => {
-    const { entries } = plan(row({ amountCents: -36500 }));
-    expect(entries[0].warnings.join()).toMatch(/Negative income/);
+    const { entries, review } = plan(row({ amountCents: -36500 }));
+    expect(entries).toHaveLength(0);
+    expect(review[0].warnings.join()).toMatch(/Negative income/);
   });
 
   it("produces balanced entries", () => {
-    const { entries } = plan(row({}), row({ category: "Transfers", subCategory: "Owner Distributions", amountCents: -89700 }));
-    for (const e of entries) {
+    const { entries, review } = plan(row({}), row({ category: "Transfers", subCategory: "Owner Distributions", amountCents: -89700 }));
+    for (const e of [...entries, ...review]) {
       const d = e.lines.reduce((s, l) => s + l.debitCents, 0);
       const c = e.lines.reduce((s, l) => s + l.creditCents, 0);
       expect(d).toBe(c);
