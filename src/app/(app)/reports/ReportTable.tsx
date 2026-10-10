@@ -1,3 +1,7 @@
+"use client";
+
+import { useMemo, useState } from "react";
+import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown } from "lucide-react";
 import { formatAmount } from "@/lib/money";
 import type { ReportData, ReportRow } from "@/lib/reports/types";
 
@@ -17,15 +21,65 @@ function cell(row: ReportRow, v: number | null | undefined, cents: boolean) {
   return formatAmount(v, cents);
 }
 
+const catKey = (row: ReportRow) => `${row.section ?? ""}|${row.cat ?? ""}`;
+
 export function ReportTable({ data, cents }: { data: ReportData; cents: boolean }) {
   const hasTotal = data.columns.at(-1) === "Total" && data.columns.length > 1;
   const colCount = data.columns.length + 1;
 
+  const [closedSections, setClosedSections] = useState<Set<string>>(new Set());
+  const [closedCats, setClosedCats] = useState<Set<string>>(new Set());
+
+  const sections = useMemo(() => data.rows.filter((r) => r.kind === "heading").map((r) => r.label), [data.rows]);
+  const cats = useMemo(() => [...new Set(data.rows.filter((r) => r.catHead).map(catKey))], [data.rows]);
+  const collapsible = sections.length > 0;
+  const allClosed = sections.every((s) => closedSections.has(s)) && cats.every((c) => closedCats.has(c));
+
+  const toggle = (set: Set<string>, setter: (s: Set<string>) => void, key: string) => {
+    const next = new Set(set);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    setter(next);
+  };
+
+  const hidden = (row: ReportRow) => {
+    if (row.kind === "heading" || row.kind === "gap") return false;
+    if (row.section && closedSections.has(row.section) && !row.summary) return true;
+    if (row.cat && !row.catHead && closedCats.has(catKey(row))) return true;
+    return false;
+  };
+
   return (
     <div>
-      <div className="mb-3 flex flex-wrap items-baseline gap-x-3">
+      <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1">
         <h2 className="text-lg font-semibold tracking-tight">{data.title}</h2>
         <p className="text-[13px] text-muted">{data.subtitle}</p>
+        {collapsible && !data.empty && (
+          <div className="ml-auto flex gap-1 print:hidden">
+            <button
+              type="button"
+              onClick={() => {
+                setClosedSections(new Set());
+                setClosedCats(new Set());
+              }}
+              disabled={closedSections.size === 0 && closedCats.size === 0}
+              className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium text-muted transition hover:bg-brand-50 hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent"
+            >
+              <ChevronsUpDown className="h-4 w-4" aria-hidden /> Expand all
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setClosedSections(new Set(sections));
+                setClosedCats(new Set(cats));
+              }}
+              disabled={allClosed}
+              className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium text-muted transition hover:bg-brand-50 hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent"
+            >
+              <ChevronsDownUp className="h-4 w-4" aria-hidden /> Collapse all
+            </button>
+          </div>
+        )}
       </div>
 
       {data.empty ? (
@@ -54,6 +108,8 @@ export function ReportTable({ data, cents }: { data: ReportData; cents: boolean 
             </thead>
             <tbody>
               {data.rows.map((row, i) => {
+                if (hidden(row)) return null;
+
                 if (row.kind === "gap") {
                   return (
                     <tr key={i} aria-hidden>
@@ -61,29 +117,52 @@ export function ReportTable({ data, cents }: { data: ReportData; cents: boolean 
                     </tr>
                   );
                 }
+
                 if (row.kind === "heading") {
+                  const closed = closedSections.has(row.label);
                   return (
                     <tr key={i}>
-                      <th
-                        colSpan={colCount}
-                        scope="colgroup"
-                        className="sticky left-0 bg-background px-3 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wider text-brand-700"
-                      >
-                        {row.label}
+                      <th colSpan={colCount} scope="colgroup" className="sticky left-0 bg-background p-0 text-left">
+                        <button
+                          type="button"
+                          aria-expanded={!closed}
+                          onClick={() => toggle(closedSections, setClosedSections, row.label)}
+                          className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wider text-brand-700 hover:bg-brand-50/60 print:cursor-default"
+                        >
+                          {closed ? <ChevronRight className="h-3.5 w-3.5" aria-hidden /> : <ChevronDown className="h-3.5 w-3.5" aria-hidden />}
+                          {row.label}
+                        </button>
                       </th>
                     </tr>
                   );
                 }
+
                 const strong = row.kind === "grand" || row.kind === "total";
                 const border = strong ? "border-t border-border-strong" : "border-t border-border/70";
                 const bg = row.kind === "grand" ? "bg-brand-50/60" : "bg-surface";
+                const isCatHead = Boolean(row.catHead);
+                const catClosed = isCatHead && closedCats.has(catKey(row));
+                const label = catClosed && row.catName ? row.catName : row.label;
+
                 return (
                   <tr key={i} className={rowStyle[row.kind]}>
                     <th
                       scope="row"
                       className={`sticky left-0 z-10 px-3 py-0.5 text-left font-[inherit] ${border} ${bg} ${row.kind === "subline" ? "pl-7" : ""}`}
                     >
-                      {row.label}
+                      {isCatHead ? (
+                        <button
+                          type="button"
+                          aria-expanded={!catClosed}
+                          onClick={() => toggle(closedCats, setClosedCats, catKey(row))}
+                          className="-ml-1 inline-flex items-center gap-1 rounded px-1 text-left hover:bg-brand-50 print:cursor-default"
+                        >
+                          {catClosed ? <ChevronRight className="h-3.5 w-3.5 text-subtle" aria-hidden /> : <ChevronDown className="h-3.5 w-3.5 text-subtle" aria-hidden />}
+                          {label}
+                        </button>
+                      ) : (
+                        label
+                      )}
                     </th>
                     {data.columns.map((_, ci) => {
                       const v = row.values?.[ci];

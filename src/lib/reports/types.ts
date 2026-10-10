@@ -27,6 +27,16 @@ export type RowKind = "heading" | "line" | "subline" | "total" | "grand" | "rati
 export interface ReportRow {
   kind: RowKind;
   label: string;
+  /** The section (heading) this row sits under; absent for rows outside any section. */
+  section?: string;
+  /** Set on the lines of a category that has subcategories, so they can be collapsed to the category total. */
+  cat?: string;
+  /** True on the category total row, which stays visible when the category is collapsed. */
+  catHead?: boolean;
+  /** The category's own name, shown on its total row when collapsed. */
+  catName?: string;
+  /** True on a section's total row, which stays visible when the section is collapsed. */
+  summary?: boolean;
   /** One value per column (plus a trailing total when enabled). Cents, or a plain ratio for kind "ratio". */
   values?: (number | null)[];
 }

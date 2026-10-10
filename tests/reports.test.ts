@@ -75,6 +75,27 @@ describe("Income Statement", () => {
   });
 });
 
+describe("collapsible structure", () => {
+  const r = buildIncomeStatement({ ...base, options: { detail: "sub", showTotal: true } });
+  const find = (label: string) => r.rows.find((x) => x.label === label)!;
+
+  it("tags section totals so they stay visible when a section is collapsed", () => {
+    expect(find("TOTAL INCOME")).toMatchObject({ section: "INCOME", summary: true });
+    expect(find("TOTAL OPERATING EXPENSES")).toMatchObject({ section: "OPERATING EXPENSES", summary: true });
+    expect(find("NET OPERATING INCOME").section).toBeUndefined();
+  });
+
+  it("tags a category's lines and its total, which stays visible when the category is collapsed", () => {
+    expect(find("Property Management")).toMatchObject({ section: "OPERATING EXPENSES", cat: "Management Fees" });
+    expect(find("General Management Fees")).toMatchObject({ cat: "Management Fees" });
+    expect(find("Total Management Fees")).toMatchObject({ cat: "Management Fees", catHead: true, catName: "Management Fees" });
+  });
+
+  it("does not make single-line categories collapsible", () => {
+    expect(find("Repairs").cat).toBeUndefined();
+  });
+});
+
 describe("Net Cash Flow", () => {
   const r = buildNetCashFlow({ ...base, options: { detail: "sub", showTotal: true } });
 

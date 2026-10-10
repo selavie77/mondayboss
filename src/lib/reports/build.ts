@@ -102,6 +102,7 @@ const isTransfer = (a: AccountInfo) => {
 
 class Report {
   rows: ReportRow[] = [];
+  private section: string | null = null;
   constructor(
     private n: number,
     private opts: BuildOptions,
@@ -112,13 +113,19 @@ class Report {
   }
 
   heading(label: string) {
-    this.rows.push({ kind: "heading", label });
+    this.section = label;
+    this.rows.push({ kind: "heading", label, section: label });
   }
   gap() {
+    this.section = null;
     this.rows.push({ kind: "gap", label: "" });
   }
-  line(label: string, v: Vec, kind: "line" | "subline" | "total" | "grand" = "line") {
-    this.rows.push({ kind, label, values: this.vals(v) });
+  line(label: string, v: Vec, kind: "line" | "subline" | "total" | "grand" = "line", extra: Partial<ReportRow> = {}) {
+    this.rows.push({ kind, label, values: this.vals(v), section: this.section ?? undefined, ...extra });
+  }
+  /** A section's total: stays visible when the section is collapsed. */
+  summary(label: string, v: Vec, kind: "total" | "grand" = "grand") {
+    this.line(label, v, kind, { summary: true });
   }
   ratio(label: string, numerator: Vec, denominator: Vec) {
     const r = (a: number, b: number) => (b > 0 ? a / b : null);
@@ -126,7 +133,7 @@ class Report {
     const total = this.opts.showTotal
       ? [r(numerator.reduce((s, x) => s + x, 0), denominator.reduce((s, x) => s + x, 0))]
       : [];
-    this.rows.push({ kind: "ratio", label, values: [...per, ...total] });
+    this.rows.push({ kind: "ratio", label, values: [...per, ...total], section: this.section ?? undefined });
   }
 
   /** Category lines (with subcategories when detail is "sub"). Returns the section total. */
@@ -140,11 +147,11 @@ class Report {
       total = add(total, catTotal);
 
       if (this.opts.detail === "sub" && kids.length > 0) {
-        if (!isZero(own)) this.line(`General ${c.name}`, own, "subline");
+        if (!isZero(own)) this.line(`General ${c.name}`, own, "subline", { cat: c.name });
         for (const [name, v] of kids.sort((a, b) => a[0].localeCompare(b[0]))) {
-          if (!isZero(v)) this.line(name, v, "subline");
+          if (!isZero(v)) this.line(name, v, "subline", { cat: c.name });
         }
-        this.line(`Total ${c.name}`, catTotal, "total");
+        this.line(`Total ${c.name}`, catTotal, "total", { cat: c.name, catName: c.name, catHead: true });
       } else {
         this.line(c.name, catTotal, "line");
       }
@@ -166,12 +173,12 @@ export function buildIncomeStatement(input: Input): ReportData {
 
   r.heading("INCOME");
   const income = r.categories(L.categories((a) => a.type === "income"), -1);
-  r.line("TOTAL INCOME", income, "grand");
+  r.summary("TOTAL INCOME", income);
   r.gap();
 
   r.heading("OPERATING EXPENSES");
   const opex = r.categories(L.categories(isOpex), 1);
-  r.line("TOTAL OPERATING EXPENSES", opex, "grand");
+  r.summary("TOTAL OPERATING EXPENSES", opex);
   r.gap();
 
   const noi = sub(income, opex);
@@ -182,7 +189,7 @@ export function buildIncomeStatement(input: Input): ReportData {
     r.gap();
     r.heading("INTEREST & DEPRECIATION");
     const other = r.categories(below, 1);
-    r.line("TOTAL INTEREST & DEPRECIATION", other, "grand");
+    r.summary("TOTAL INTEREST & DEPRECIATION", other);
     r.gap();
     r.line("NET INCOME", sub(noi, other), "grand");
   }
@@ -195,12 +202,12 @@ export function buildNetCashFlow(input: Input): ReportData {
 
   r.heading("INCOME");
   const income = r.categories(L.categories((a) => a.type === "income"), -1);
-  r.line("TOTAL INCOME", income, "grand");
+  r.summary("TOTAL INCOME", income);
   r.gap();
 
   r.heading("OPERATING EXPENSES");
   const opex = r.categories(L.categories(isOpex), 1);
-  r.line("TOTAL OPERATING EXPENSES", opex, "grand");
+  r.summary("TOTAL OPERATING EXPENSES", opex);
   r.gap();
 
   const noi = sub(income, opex);
@@ -213,13 +220,13 @@ export function buildNetCashFlow(input: Input): ReportData {
   if (!isZero(interest)) r.line("Interest", interest, "subline");
   if (!isZero(principal)) r.line("Principal", principal, "subline");
   const debtService = add(interest, principal);
-  r.line("TOTAL MORTGAGES & LOANS", debtService, "total");
+  r.summary("TOTAL MORTGAGES & LOANS", debtService, "total");
   r.ratio("Debt Service Coverage Ratio", noi, debtService);
   r.gap();
 
   r.heading("CAPITAL EXPENSES");
   const capex = L.sum(isFixedAsset);
-  r.line("TOTAL CAPITAL EXPENSES", capex, "total");
+  r.summary("TOTAL CAPITAL EXPENSES", capex, "total");
   r.gap();
 
   const ncf = sub(sub(noi, debtService), capex);
@@ -230,7 +237,7 @@ export function buildNetCashFlow(input: Input): ReportData {
   r.heading("TRANSFERS");
   // Cash effect: money that left (debits to these accounts) is negative.
   const transfers = r.categories(L.categories(isTransfer), -1);
-  r.line("TOTAL TRANSFERS", transfers, "total");
+  r.summary("TOTAL TRANSFERS", transfers, "total");
   r.gap();
   r.line("NET CHANGE IN CASH", add(ncf, transfers), "grand");
 
