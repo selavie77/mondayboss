@@ -36,12 +36,12 @@ export function EditDescription({ id, value }: { id: string; value: string | nul
           maxLength={400}
           onChange={(e) => setText(e.target.value)}
           placeholder="What is this category for?"
-          className="h-9 text-sm"
+          compact
           autoFocus
         />
       </div>
       <Button
-        className="h-9 px-3 text-sm"
+        size="sm"
         disabled={pending}
         onClick={() =>
           start(async () => {
@@ -53,7 +53,7 @@ export function EditDescription({ id, value }: { id: string; value: string | nul
       >
         {pending ? "Saving…" : "Save"}
       </Button>
-      <Button variant="ghost" className="h-9 px-3 text-sm" onClick={() => setEditing(false)}>
+      <Button variant="ghost" size="sm" onClick={() => setEditing(false)}>
         Cancel
       </Button>
       {error && (

@@ -1,0 +1,113 @@
+import { formatAmount } from "@/lib/money";
+import type { ReportData, ReportRow } from "@/lib/reports/types";
+
+const rowStyle: Record<ReportRow["kind"], string> = {
+  heading: "",
+  gap: "",
+  line: "",
+  subline: "text-muted",
+  total: "font-medium",
+  grand: "font-semibold",
+  ratio: "text-muted italic",
+};
+
+function cell(row: ReportRow, v: number | null | undefined, cents: boolean) {
+  if (v === null || v === undefined) return "–";
+  if (row.kind === "ratio") return `${v.toFixed(2)}x`;
+  return formatAmount(v, cents);
+}
+
+export function ReportTable({ data, cents }: { data: ReportData; cents: boolean }) {
+  const hasTotal = data.columns.at(-1) === "Total" && data.columns.length > 1;
+  const colCount = data.columns.length + 1;
+
+  return (
+    <div>
+      <div className="mb-3 flex flex-wrap items-baseline gap-x-3">
+        <h2 className="text-lg font-semibold tracking-tight">{data.title}</h2>
+        <p className="text-[13px] text-muted">{data.subtitle}</p>
+      </div>
+
+      {data.empty ? (
+        <div className="rounded-2xl border border-dashed border-border-strong bg-surface p-10 text-center">
+          <p className="font-medium">No activity in this period</p>
+          <p className="mt-1 text-sm text-muted">Try a different date range or property.</p>
+        </div>
+      ) : (
+        <div className="overflow-x-auto rounded-xl border border-border bg-surface shadow-[var(--shadow-card)] print:overflow-visible print:shadow-none">
+          <table className="w-full border-separate border-spacing-0 text-[13px] leading-5 print:text-[11px]">
+            <thead>
+              <tr>
+                <th className="sticky left-0 z-20 w-60 min-w-52 border-b border-border-strong bg-surface px-3 py-2 text-left" aria-label="Category" />
+                {data.columns.map((c, i) => (
+                  <th
+                    key={c + i}
+                    scope="col"
+                    className={`min-w-[4.9rem] border-b border-border-strong px-2.5 py-2 text-right align-bottom text-xs font-semibold leading-tight ${
+                      hasTotal && i === data.columns.length - 1 ? "bg-brand-50 text-brand-900" : "bg-surface text-muted"
+                    }`}
+                  >
+                    <span className="inline-block max-w-[7rem] whitespace-normal">{c}</span>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {data.rows.map((row, i) => {
+                if (row.kind === "gap") {
+                  return (
+                    <tr key={i} aria-hidden>
+                      <td colSpan={colCount} className="h-1.5" />
+                    </tr>
+                  );
+                }
+                if (row.kind === "heading") {
+                  return (
+                    <tr key={i}>
+                      <th
+                        colSpan={colCount}
+                        scope="colgroup"
+                        className="sticky left-0 bg-background px-3 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wider text-brand-700"
+                      >
+                        {row.label}
+                      </th>
+                    </tr>
+                  );
+                }
+                const strong = row.kind === "grand" || row.kind === "total";
+                const border = strong ? "border-t border-border-strong" : "border-t border-border/70";
+                const bg = row.kind === "grand" ? "bg-brand-50/60" : "bg-surface";
+                return (
+                  <tr key={i} className={rowStyle[row.kind]}>
+                    <th
+                      scope="row"
+                      className={`sticky left-0 z-10 px-3 py-0.5 text-left font-[inherit] ${border} ${bg} ${row.kind === "subline" ? "pl-7" : ""}`}
+                    >
+                      {row.label}
+                    </th>
+                    {data.columns.map((_, ci) => {
+                      const v = row.values?.[ci];
+                      const isTotalCol = hasTotal && ci === data.columns.length - 1;
+                      return (
+                        <td
+                          key={ci}
+                          className={`num whitespace-nowrap px-2.5 py-0.5 text-right ${border} ${
+                            isTotalCol && row.kind !== "grand" ? "bg-brand-50/40" : bg
+                          } ${typeof v === "number" && v < 0 ? "text-negative" : ""} ${
+                            v === 0 && row.kind !== "ratio" ? "text-subtle" : ""
+                          }`}
+                        >
+                          {cell(row, v, cents)}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}

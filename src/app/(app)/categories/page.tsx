@@ -33,7 +33,7 @@ export default async function CategoriesPage({ searchParams }: PageProps<"/categ
     : { data: [] };
 
   return (
-    <div className="space-y-8">
+    <div className="mx-auto max-w-5xl space-y-8">
       <header className="rise">
         <h1 className="text-3xl font-semibold tracking-tight">Categories</h1>
         <p className="mt-1 max-w-2xl text-muted">

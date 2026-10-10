@@ -52,7 +52,7 @@ export function AddCategory({
           name="name"
           aria-label={isSub ? `New subcategory under ${parentName}` : "New category name"}
           placeholder={isSub ? `New subcategory under ${parentName}` : "Category name"}
-          className="h-10 text-sm"
+          compact
           autoFocus
           required
         />
@@ -63,12 +63,12 @@ export function AddCategory({
           aria-label="Description"
           placeholder="What is this for? (optional)"
           maxLength={400}
-          className="h-10 text-sm"
+          compact
         />
       </div>
       {wantsTaxLine && (
         <div className="w-full sm:w-64">
-          <Select name="tax_line" aria-label="Schedule E line" defaultValue="" className="h-10 text-sm">
+          <Select name="tax_line" aria-label="Schedule E line" defaultValue="" compact>
             <option value="">Schedule E line (optional)</option>
             {taxLines.map((l) => (
               <option key={l.value} value={l.value}>
@@ -78,10 +78,10 @@ export function AddCategory({
           </Select>
         </div>
       )}
-      <Button type="submit" className="h-10 px-4 text-sm" disabled={pending}>
+      <Button type="submit" size="sm" disabled={pending}>
         {pending ? "Adding…" : "Add"}
       </Button>
-      <Button type="button" variant="ghost" className="h-10 px-3 text-sm" onClick={() => setOpen(false)}>
+      <Button type="button" variant="ghost" size="sm" onClick={() => setOpen(false)}>
         Cancel
       </Button>
       {state?.error && (

@@ -40,6 +40,7 @@ export const SUB_DESCRIPTIONS: Record<string, string> = {
   "Water & Sewer": "Water and sewer charges for the property.",
   Electric: "Electric service for the property.",
   "Bank Fees": "Monthly account, wire and similar bank fees.",
+  "Property Management": "Monthly fees charged by your property manager.",
 };
 
 export interface Mapped {
@@ -73,7 +74,7 @@ export function mapStessaRow(row: StessaRow): Mapped | Unresolved {
 
     case "Management Fees":
       if (sub === "Leasing Commissions") return { counterCode: CODES.commissions };
-      return { counterCode: CODES.management };
+      return { counterCode: CODES.management, sub: sub ?? undefined };
 
     case "Mortgages & Loans":
       if (sub === "Mortgage Interest") return { counterCode: CODES.mortgageInterest };

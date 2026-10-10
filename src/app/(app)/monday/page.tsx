@@ -72,7 +72,7 @@ export default async function MondayPage({ searchParams }: PageProps<"/monday">)
   const maxIncome = Math.max(1, ...propertyRows.map((p) => p.income));
 
   return (
-    <div className="space-y-8">
+    <div className="mx-auto max-w-5xl space-y-8">
       <header className="rise flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="text-sm text-muted">

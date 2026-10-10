@@ -66,7 +66,7 @@ export default async function ReviewPage() {
   });
 
   return (
-    <div className="space-y-8">
+    <div className="mx-auto max-w-5xl space-y-8">
       <header className="rise">
         <h1 className="text-3xl font-semibold tracking-tight">Review</h1>
         <p className="mt-1 text-muted">

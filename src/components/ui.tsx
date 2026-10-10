@@ -25,15 +25,17 @@ export function Logo({ size = "md", invert = false }: { size?: "md" | "lg"; inve
 
 type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: "primary" | "secondary" | "ghost";
+  size?: "md" | "sm";
   block?: boolean;
 };
 
-export function Button({ variant = "primary", block, className, ...props }: ButtonProps) {
+export function Button({ variant = "primary", size = "md", block, className, ...props }: ButtonProps) {
   return (
     <button
       {...props}
       className={cx(
-        "inline-flex h-11 items-center justify-center gap-2 rounded-xl px-5 text-[15px] font-medium transition",
+        "inline-flex items-center justify-center gap-2 rounded-xl font-medium transition",
+        size === "md" ? "h-11 px-5 text-[15px]" : "h-9 px-3.5 text-sm",
         "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500",
         "disabled:cursor-not-allowed disabled:opacity-60",
         variant === "primary" && "bg-brand-600 text-white shadow-sm hover:bg-brand-700",
@@ -47,7 +49,7 @@ export function Button({ variant = "primary", block, className, ...props }: Butt
 }
 
 const fieldClass =
-  "h-11 w-full rounded-xl border border-border-strong bg-surface px-3.5 text-[15px] text-foreground " +
+  "w-full rounded-xl border border-border-strong bg-surface text-foreground " +
   "placeholder:text-subtle transition focus:border-brand-500 focus:outline-none focus:ring-4 focus:ring-brand-100";
 
 export function Field({
@@ -68,15 +70,17 @@ export function Field({
   );
 }
 
-export function Input(props: InputHTMLAttributes<HTMLInputElement>) {
-  return <input {...props} className={cx(fieldClass, props.className)} />;
+const sizeClass = (compact?: boolean) => (compact ? "h-9 px-3 text-sm" : "h-11 px-3.5 text-[15px]");
+
+export function Input({ compact, ...props }: InputHTMLAttributes<HTMLInputElement> & { compact?: boolean }) {
+  return <input {...props} className={cx(fieldClass, sizeClass(compact), props.className)} />;
 }
 
-export function Select(props: SelectHTMLAttributes<HTMLSelectElement>) {
+export function Select({ compact, ...props }: SelectHTMLAttributes<HTMLSelectElement> & { compact?: boolean }) {
   return (
     <select
       {...props}
-      className={cx(fieldClass, "appearance-none bg-no-repeat pr-9", props.className)}
+      className={cx(fieldClass, sizeClass(compact), "appearance-none bg-no-repeat", compact ? "pr-8" : "pr-9", props.className)}
       style={{
         backgroundImage:
           "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%235d706e' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E\")",

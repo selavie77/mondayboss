@@ -5,6 +5,8 @@ import type { PGlite } from "@electric-sql/pglite";
 import { parseStessaLedger } from "@/lib/import/stessa";
 import { planStessaImport, type ImportPlan } from "@/lib/import/stessaEntries";
 import { formatCents } from "@/lib/money";
+import { buildIncomeStatement, buildNetCashFlow } from "@/lib/reports/build";
+import type { AccountInfo, ActivityRow, ReportData } from "@/lib/reports/types";
 import { freshDb, seedEntity } from "./db";
 
 // Your real 2021 Stessa exports. The test is skipped on machines that don't have them.
@@ -86,5 +88,48 @@ describe.skipIf(!available)("real Stessa 2021 ledgers", () => {
       `\nposted ${plan.entries.length} entries, unresolved ${plan.unresolved.length}`].join("\n"));
     expect(plan.entries.length).toBeGreaterThan(500);
     expect(plan.review.length).toBeGreaterThan(0);
+  });
+
+  it("reproduces Stessa's 2021 Income Statement and Net Cash Flow for 126 E Orchard Springs", async () => {
+    const props = (await db.query<{ id: string; name: string }>(`select id, name from properties order by name`)).rows;
+    const accts = (await db.query<{ id: string; parent_id: string | null; code: string; name: string; type: AccountInfo["type"]; subtype: string | null; is_bank: boolean }>(
+      `select id, parent_id, code, name, type, subtype, is_bank from accounts`)).rows;
+    const accounts: AccountInfo[] = accts.map((a) => ({ id: a.id, parentId: a.parent_id, code: a.code, name: a.name, type: a.type, subtype: a.subtype, isBank: a.is_bank }));
+    const act = (await db.query<{ property_id: string | null; account_id: string; net_cents: string | number }>(
+      `select property_id, account_id, net_cents from report_activity('2021-01-01', '2021-12-31', 'property')`)).rows;
+    const activity: ActivityRow[] = act.map((r) => ({ columnKey: r.property_id ?? "unassigned", accountId: r.account_id, netCents: Number(r.net_cents) }));
+    const columns = props.map((p) => ({ key: p.id, label: p.name }));
+    const orchard = props.findIndex((p) => p.name === "126 E Orchard Springs Dr");
+    const input = { accounts, activity, columns, subtitle: "", options: { detail: "sub" as const, showTotal: true } };
+
+    // Stessa shows whole dollars, so compare in whole dollars.
+    const dollars = (r: ReportData, label: string) => Math.round(r.rows.find((x) => x.label === label)!.values![orchard]! / 100);
+
+    const is = buildIncomeStatement(input);
+    expect(dollars(is, "TOTAL INCOME")).toBe(11550);
+    expect(dollars(is, "General Management Fees")).toBe(257);
+    expect(dollars(is, "Property Management")).toBe(756);
+    expect(dollars(is, "Total Management Fees")).toBe(1013);
+    expect(dollars(is, "Total Utilities")).toBe(315);
+    expect(dollars(is, "Total Repairs")).toBe(1496);
+    expect(dollars(is, "TOTAL OPERATING EXPENSES")).toBe(2853);
+    expect(dollars(is, "NET OPERATING INCOME")).toBe(8697);
+
+    const cf = buildNetCashFlow(input);
+    expect(dollars(cf, "Interest")).toBe(3057);
+    expect(dollars(cf, "Principal")).toBe(1074);
+    expect(dollars(cf, "NET CASH FLOW")).toBe(4566);
+    expect(dollars(cf, "NCF Before Principal Payments")).toBe(5640);
+    expect(dollars(cf, "TOTAL TRANSFERS")).toBe(-2850);
+
+    // The books themselves: net change in cash must equal the movement in the cash account, for every property.
+    const cash = await db.query<{ property_id: string; net: string | number }>(
+      `select l.property_id, sum(l.debit_cents - l.credit_cents) net
+         from journal_lines l join accounts a on a.id = l.account_id where a.is_bank group by 1`);
+    const change = cf.rows.find((x) => x.label === "NET CHANGE IN CASH")!.values!;
+    for (const c of cash.rows) {
+      const i = props.findIndex((p) => p.id === c.property_id);
+      expect(change[i]).toBe(Number(c.net));
+    }
   });
 });

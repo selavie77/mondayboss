@@ -11,7 +11,7 @@ const items = [
   { href: "/categories", label: "Categories", icon: FolderTree },
   { href: "#", label: "Import", icon: Upload, soon: true },
   { href: "#", label: "Ledger", icon: BookOpen, soon: true },
-  { href: "#", label: "Reports", icon: FileBarChart, soon: true },
+  { href: "/reports", label: "Reports", icon: FileBarChart },
 ];
 
 export function Nav({ reviewCount = 0 }: { reviewCount?: number }) {

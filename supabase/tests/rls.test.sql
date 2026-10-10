@@ -1,5 +1,5 @@
 begin;
-select plan(12);
+select plan(16);
 
 -- Two users, each gets their own workspace via the sign-up trigger.
 insert into auth.users (id, email, raw_user_meta_data) values
@@ -30,12 +30,21 @@ select lives_ok($$
 $$, 'user A can post a balanced entry');
 select is((select count(*)::int from journal_entries), 1, 'user A sees their entry');
 
+insert into properties (workspace_id, portfolio_id, entity_id, name)
+  select ws_a, pf_a, (select id from entities where name = 'A LLC'), 'A House' from ctx;
+insert into capital_expenses (workspace_id, property_id, name, amount_cents, spent_on)
+  select ws_a, (select id from properties where name = 'A House'), 'Purchase', 9000000, '2019-09-06' from ctx;
+select is((select count(*)::int from capital_expenses), 1, 'user A sees their capital expense');
+select is((select count(*)::int from report_activity('2021-01-01', '2021-12-31')), 2, 'user A report query returns their activity');
+
 -- User B sees none of A's data.
 select set_config('request.jwt.claims', '{"sub":"bbbbbbbb-0000-0000-0000-000000000002","role":"authenticated"}', true);
 select is((select count(*)::int from entities), 0, 'user B cannot see A entities');
 select is((select count(*)::int from journal_entries), 0, 'user B cannot see A journal entries');
 select is((select count(*)::int from journal_lines), 0, 'user B cannot see A journal lines');
 select is((select count(*)::int from trial_balance), 0, 'user B cannot see A trial balance');
+select is((select count(*)::int from capital_expenses), 0, 'user B cannot see A capital expenses');
+select is((select count(*)::int from report_activity('2021-01-01', '2021-12-31')), 0, 'user B report query returns nothing of A');
 
 -- User B cannot write into A's workspace.
 select throws_ok($$insert into entities (workspace_id, name) select ws_a, 'Intruder LLC' from ctx$$,

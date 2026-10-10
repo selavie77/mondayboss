@@ -61,7 +61,7 @@ function AccountSelect({
   label: string;
 }) {
   return (
-    <Select aria-label={label} value={value} onChange={(e) => onChange(e.target.value)} className="h-10 text-sm">
+    <Select aria-label={label} value={value} onChange={(e) => onChange(e.target.value)} compact>
       <option value="">Choose an account…</option>
       {typeOrder.map((t) => {
         const group = accounts.filter((a) => a.type === t && !a.isBank);
@@ -198,17 +198,17 @@ function Row({ item, accounts }: { item: ReviewItem; accounts: AccountOption[] }
       {mode === "view" && (
         <div className="mt-3 flex flex-wrap gap-2">
           {item.hasProposal && (
-            <Button className="h-9 px-4 text-sm" disabled={pending} onClick={() => run(() => acceptLines([item.id]))}>
+            <Button size="sm" disabled={pending} onClick={() => run(() => acceptLines([item.id]))}>
               <Check className="h-4 w-4" aria-hidden /> Accept
             </Button>
           )}
-          <Button variant="secondary" className="h-9 px-4 text-sm" disabled={pending} onClick={() => setMode("change")}>
+          <Button variant="secondary" size="sm" disabled={pending} onClick={() => setMode("change")}>
             <Tag className="h-4 w-4" aria-hidden /> Change category
           </Button>
-          <Button variant="secondary" className="h-9 px-4 text-sm" disabled={pending} onClick={() => setMode("split")}>
+          <Button variant="secondary" size="sm" disabled={pending} onClick={() => setMode("split")}>
             <Scissors className="h-4 w-4" aria-hidden /> Split
           </Button>
-          <Button variant="ghost" className="h-9 px-3 text-sm" disabled={pending} onClick={() => run(() => ignoreLine(item.id))}>
+          <Button variant="ghost" size="sm" disabled={pending} onClick={() => run(() => ignoreLine(item.id))}>
             <X className="h-4 w-4" aria-hidden /> Ignore
           </Button>
         </div>
@@ -260,10 +260,10 @@ function Change({
       <div className="w-full sm:w-80">
         <AccountSelect accounts={accounts} value={accountId} onChange={setAccountId} label="Category" />
       </div>
-      <Button className="h-10 px-4 text-sm" disabled={!accountId || pending} onClick={() => onPost(accountId)}>
+      <Button size="sm" disabled={!accountId || pending} onClick={() => onPost(accountId)}>
         {pending ? "Posting…" : "Post to books"}
       </Button>
-      <Button variant="ghost" className="h-10 px-3 text-sm" onClick={onCancel}>
+      <Button variant="ghost" size="sm" onClick={onCancel}>
         Cancel
       </Button>
     </div>
@@ -337,7 +337,7 @@ function Split({
                 placeholder="0.00"
                 value={p.amount}
                 onChange={(e) => update(p.key, { amount: e.target.value })}
-                className="h-10 text-right text-sm num"
+                compact className="text-right num"
               />
               {parts.length > 2 ? (
                 <button
@@ -374,7 +374,7 @@ function Split({
 
       <div className="mt-4 flex gap-2">
         <Button
-          className="h-10 px-4 text-sm"
+          size="sm"
           disabled={!valid || pending}
           onClick={() =>
             onPost(
@@ -386,7 +386,7 @@ function Split({
         >
           {pending ? "Posting…" : "Post split to books"}
         </Button>
-        <Button variant="ghost" className="h-10 px-3 text-sm" onClick={onCancel}>
+        <Button variant="ghost" size="sm" onClick={onCancel}>
           Cancel
         </Button>
       </div>
