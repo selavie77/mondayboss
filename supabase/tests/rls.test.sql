@@ -1,5 +1,5 @@
 begin;
-select plan(16);
+select plan(18);
 
 -- Two users, each gets their own workspace via the sign-up trigger.
 insert into auth.users (id, email, raw_user_meta_data) values
@@ -35,6 +35,8 @@ insert into properties (workspace_id, portfolio_id, entity_id, name)
 insert into capital_expenses (workspace_id, property_id, name, amount_cents, spent_on)
   select ws_a, (select id from properties where name = 'A House'), 'Purchase', 9000000, '2019-09-06' from ctx;
 select is((select count(*)::int from capital_expenses), 1, 'user A sees their capital expense');
+insert into report_prefs (user_id, report_key, is_favorite) values ('aaaaaaaa-0000-0000-0000-000000000001', 'income-statement', true);
+select is((select count(*)::int from report_prefs), 1, 'user A sees their report favorites');
 select is((select count(*)::int from report_activity('2021-01-01', '2021-12-31')), 2, 'user A report query returns their activity');
 
 -- User B sees none of A's data.
@@ -44,6 +46,7 @@ select is((select count(*)::int from journal_entries), 0, 'user B cannot see A j
 select is((select count(*)::int from journal_lines), 0, 'user B cannot see A journal lines');
 select is((select count(*)::int from trial_balance), 0, 'user B cannot see A trial balance');
 select is((select count(*)::int from capital_expenses), 0, 'user B cannot see A capital expenses');
+select is((select count(*)::int from report_prefs), 0, 'user B cannot see A report favorites');
 select is((select count(*)::int from report_activity('2021-01-01', '2021-12-31')), 0, 'user B report query returns nothing of A');
 
 -- User B cannot write into A's workspace.

@@ -32,8 +32,12 @@ export const REPORTS: { kind: ReportKind; label: string; description: string }[]
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
 
-export function parseParams(sp: Record<string, string | string[] | undefined>, defaultYear: number): ReportParams {
-  const kind = one(sp.report);
+export function parseParams(
+  sp: Record<string, string | string[] | undefined>,
+  defaultYear: number,
+  forced?: ReportKind,
+): ReportParams {
+  const kind = forced ?? one(sp.report);
   const report = REPORTS.some((r) => r.kind === kind) ? (kind as ReportKind) : "income-statement";
 
   let from = one(sp.from);
@@ -56,15 +60,15 @@ export function parseParams(sp: Record<string, string | string[] | undefined>, d
   };
 }
 
-export function toQuery(p: ReportParams): string {
+export function toQuery(p: ReportParams, includeReport = true): string {
   const q = new URLSearchParams({
-    report: p.report,
     from: p.from,
     to: p.to,
     property: p.property,
     columns: p.columns,
     detail: p.detail,
   });
+  if (includeReport) q.set("report", p.report);
   if (p.cents) q.set("cents", "1");
   return q.toString();
 }
