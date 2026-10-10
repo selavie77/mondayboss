@@ -119,9 +119,24 @@ export async function loadReport(params: ReportParams): Promise<ReportData> {
   }
 
   let firstEntryDate: string | undefined;
+  let openingBalancesDate: string | undefined;
   if (params.report === "balance-sheet") {
     const { data } = await supabase.from("journal_entries").select("entry_date").order("entry_date").limit(1);
     firstEntryDate = data?.[0]?.entry_date ?? undefined;
+
+    // An opening balances entry only counts while it has not been reversed.
+    const { data: opening } = await supabase
+      .from("journal_entries")
+      .select("id, entry_date")
+      .eq("source", "system")
+      .like("memo", "Opening balance:%")
+      .order("entry_date");
+    const openingIds = (opening ?? []).map((o) => o.id);
+    const { data: undone } = openingIds.length
+      ? await supabase.from("journal_entries").select("reverses_entry_id").in("reverses_entry_id", openingIds)
+      : { data: [] };
+    const undoneIds = new Set((undone ?? []).map((u) => u.reverses_entry_id as string));
+    openingBalancesDate = (opening ?? []).find((o) => !undoneIds.has(o.id))?.entry_date;
   }
 
   const input = {
@@ -130,7 +145,7 @@ export async function loadReport(params: ReportParams): Promise<ReportData> {
     columns,
     subtitle: asOf ? `As of ${longDate(params.to)}` : describeRange(params.from, params.to),
     options: { detail: params.detail, showTotal: grouping !== "total" },
-    context: { filtered, firstEntryDate },
+    context: { filtered, firstEntryDate, openingBalancesDate },
   };
   const data =
     params.report === "net-cash-flow"

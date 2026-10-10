@@ -12,6 +12,8 @@ export interface CommitOptions {
   propertyIds: Map<string, string>; // property name -> id
   /** Bank account the statement rows belong to, by code. */
   bankCode?: string;
+  /** The account a property's transactions are paid from by default (see resolvePaidFrom). */
+  cashAccountFor?: (propertyName: string) => string | null;
 }
 
 export interface CommitResult {
@@ -56,8 +58,12 @@ export async function commitImportPlan(supabase: SupabaseClient, o: CommitOption
     o.accountIds.set(key, made.data as string);
   }
 
-  const bankId = o.accountIds.get(o.bankCode ?? "1000") ?? null;
-  const acct = (code?: string) => (code ? (o.accountIds.get(code) ?? null) : null);
+  // The cash side of a transaction goes to the property's own bank account or card when it has one,
+  // otherwise to the general account.
+  const cashCode = o.bankCode ?? "1000";
+  const cashFor = (propertyName: string) => o.cashAccountFor?.(propertyName) ?? o.accountIds.get(cashCode) ?? null;
+  const resolve = (code: string | undefined, propertyName: string) =>
+    code === undefined ? null : code === cashCode ? cashFor(propertyName) : (o.accountIds.get(code) ?? null);
 
   type Staged = { entry?: DraftEntry; held?: DraftEntry; unresolved?: UnresolvedRow };
   const staged: Staged[] = [
@@ -73,7 +79,7 @@ export async function commitImportPlan(supabase: SupabaseClient, o: CommitOption
       workspace_id: o.workspaceId,
       entity_id: o.entityId,
       batch_id: batchId,
-      account_id: bankId,
+      account_id: cashFor(row.property),
       property_id: o.propertyIds.get(row.property) ?? null,
       txn_date: row.date,
       description: [row.name, row.notes].filter(Boolean).join(" - ") || "(no description)",
@@ -81,8 +87,8 @@ export async function commitImportPlan(supabase: SupabaseClient, o: CommitOption
       raw: { category: row.category, subCategory: row.subCategory, source: row.source, account: row.account, details: row.details },
       dedupe_hash: row.dedupeHash,
       review_reason: s.held ? s.held.warnings.join("; ") : (s.unresolved?.reason ?? null),
-      proposed_debit_account_id: s.held ? acct(s.held.debitCode) : null,
-      proposed_credit_account_id: s.held ? acct(s.held.creditCode) : null,
+      proposed_debit_account_id: s.held ? resolve(s.held.debitCode, row.property) : null,
+      proposed_credit_account_id: s.held ? resolve(s.held.creditCode, row.property) : null,
     };
   };
 
@@ -105,7 +111,7 @@ export async function commitImportPlan(supabase: SupabaseClient, o: CommitOption
       const id = idByHash.get(s.entry.dedupeHash);
       if (!id) continue; // already imported earlier
       const lines = s.entry.lines.map((l) => ({
-        account_id: o.accountIds.get(l.accountCode),
+        account_id: resolve(l.accountCode, l.property),
         property_id: o.propertyIds.get(l.property) ?? null,
         debit_cents: l.debitCents,
         credit_cents: l.creditCents,

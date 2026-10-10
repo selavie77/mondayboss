@@ -14,6 +14,7 @@ import path from "node:path";
 import { parseStessaLedger } from "../src/lib/import/stessa";
 import { planStessaImport } from "../src/lib/import/stessaEntries";
 import { commitImportPlan } from "../src/lib/import/commit";
+import { resolvePaidFrom } from "../src/lib/paidFrom";
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!;
@@ -94,7 +95,20 @@ async function main() {
     props.set(l.propertyName, ins.data.id);
   }
 
+  const cash = await supabase.from("accounts").select("id, code, is_bank, subtype, property_id, portfolio_id").eq("entity_id", entityId);
+  const cashAccounts = (cash.data ?? []).map((a) => ({
+    id: a.id as string,
+    code: a.code as string,
+    isBank: a.is_bank as boolean,
+    subtype: a.subtype as string | null,
+    propertyId: a.property_id as string | null,
+    portfolioId: a.portfolio_id as string | null,
+  }));
+  const propRows = await supabase.from("properties").select("id, name, portfolio_id").eq("entity_id", entityId);
+  const propByName = new Map((propRows.data ?? []).map((p) => [p.name as string, { id: p.id as string, portfolioId: p.portfolio_id as string | null }]));
+
   const result = await commitImportPlan(supabase, {
+    cashAccountFor: (name) => resolvePaidFrom(propByName.get(name) ?? null, cashAccounts),
     workspaceId,
     entityId,
     source: "Stessa general ledger",

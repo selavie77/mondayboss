@@ -44,6 +44,7 @@ export interface ReportRow {
 export interface ReportNote {
   tone: "ok" | "warn" | "info";
   text: string;
+  link?: { href: string; label: string };
 }
 
 export interface ReportData {

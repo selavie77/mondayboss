@@ -30,7 +30,11 @@ export async function acceptLines(ids: string[]): Promise<ReviewResult> {
 }
 
 /** Post a pending line using one or more accounts on the non-bank side (a split when there are several). */
-export async function postLine(id: string, parts: { accountId: string; cents: number }[]): Promise<ReviewResult> {
+export async function postLine(
+  id: string,
+  parts: { accountId: string; cents: number }[],
+  paidFromAccountId?: string,
+): Promise<ReviewResult> {
   const idOk = uuid.safeParse(id);
   const partsOk = partsSchema.safeParse(parts);
   if (!idOk.success) return { error: "Unknown transaction." };
@@ -39,7 +43,7 @@ export async function postLine(id: string, parts: { accountId: string; cents: nu
 
   const { data: line } = await supabase
     .from("statement_lines")
-    .select("entity_id, amount_cents, property_id, status")
+    .select("entity_id, amount_cents, property_id, status, account_id")
     .eq("id", id)
     .single();
   if (!line || line.status !== "pending") return { error: "That transaction was already handled." };
@@ -48,13 +52,27 @@ export async function postLine(id: string, parts: { accountId: string; cents: nu
   const total = partsOk.data.reduce((s, p) => s + p.cents, 0);
   if (total !== abs) return { error: "The amounts must add up to the transaction total." };
 
-  const { data: cash } = await supabase
-    .from("accounts")
-    .select("id")
-    .eq("entity_id", line.entity_id)
-    .eq("code", "1000")
-    .single();
-  if (!cash) return { error: "This entity has no operating checking account (1000)." };
+  // Paid from: the account the person chose, else the one picked at import, else Operating Checking.
+  // It must be one of this entity's bank accounts or credit cards.
+  let paidFrom: string | null = null;
+  for (const candidate of [paidFromAccountId, line.account_id as string | null]) {
+    if (!candidate) continue;
+    const { data: acct } = await supabase
+      .from("accounts")
+      .select("id, is_bank, subtype")
+      .eq("id", candidate)
+      .eq("entity_id", line.entity_id)
+      .maybeSingle();
+    if (acct && (acct.is_bank || acct.subtype === "credit_card")) {
+      paidFrom = acct.id;
+      break;
+    }
+  }
+  if (!paidFrom) {
+    const { data: fallback } = await supabase.from("accounts").select("id").eq("entity_id", line.entity_id).eq("code", "1000").maybeSingle();
+    paidFrom = fallback?.id ?? null;
+  }
+  if (!paidFrom) return { error: "Choose the account this was paid from." };
 
   // Money out: Dr the chosen accounts, Cr cash. Money in: Dr cash, Cr the chosen accounts.
   const inflow = Number(line.amount_cents) > 0;
@@ -62,7 +80,7 @@ export async function postLine(id: string, parts: { accountId: string; cents: nu
   const otherSide = inflow ? "debit_cents" : "credit_cents";
   const lines = [
     ...partsOk.data.map((p) => ({ account_id: p.accountId, property_id: line.property_id, [side]: p.cents })),
-    { account_id: cash.id, property_id: line.property_id, [otherSide]: abs },
+    { account_id: paidFrom, property_id: line.property_id, [otherSide]: abs },
   ];
 
   const { error } = await supabase.rpc("post_statement_line", { p_line_id: id, p_lines: lines });

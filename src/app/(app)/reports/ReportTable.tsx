@@ -92,7 +92,17 @@ export function ReportTable({ data, cents }: { data: ReportData; cents: boolean 
               }`}
             >
               {n.tone === "ok" ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" aria-hidden /> : n.tone === "warn" ? <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden /> : <Info className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />}
-              {n.text}
+              <span>
+                {n.text}
+                {n.link && (
+                  <>
+                    {" "}
+                    <a href={n.link.href} className="font-semibold underline underline-offset-2">
+                      {n.link.label}
+                    </a>
+                  </>
+                )}
+              </span>
             </li>
           ))}
         </ul>

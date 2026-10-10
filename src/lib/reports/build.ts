@@ -16,7 +16,7 @@ interface Input {
   options: BuildOptions;
   subtitle: string;
   /** Extra facts the point-in-time reports mention in their notes. */
-  context?: { filtered?: boolean; firstEntryDate?: string };
+  context?: { filtered?: boolean; firstEntryDate?: string; openingBalancesDate?: string };
 }
 
 type Vec = number[];
@@ -289,10 +289,17 @@ export function buildBalanceSheet(input: Input): ReportData {
         : "Assets do not equal liabilities plus equity. Check your entries.",
     });
   }
-  if (input.context?.firstEntryDate) {
+  if (input.context?.openingBalancesDate) {
     notes.push({
       tone: "info",
-      text: `Based on the entries recorded in Mondayboss, starting ${longDate(input.context.firstEntryDate)}. Balances from before then, such as property cost and loan balances, are not included until you add opening balances.`,
+      text: `Includes the opening balances you entered on your accounts, starting ${longDate(input.context.openingBalancesDate)}.`,
+      link: { href: "/categories", label: "View accounts" },
+    });
+  } else if (input.context?.firstEntryDate) {
+    notes.push({
+      tone: "info",
+      text: `Based on the entries recorded in Mondayboss, starting ${longDate(input.context.firstEntryDate)}. Balances from before then, such as cash, property cost and loan balances, are not included until you add opening balances on your accounts.`,
+      link: { href: "/categories", label: "Add opening balances" },
     });
   }
   const data = finish("Balance Sheet", input, r);

@@ -235,3 +235,82 @@ describe("category descriptions", () => {
     ]);
   });
 });
+
+describe("account opening balances and bank / credit card accounts", () => {
+  const newEntity = async (name: string) => {
+    const ent = (await db.query<{ id: string }>(`insert into entities (workspace_id, name) values ($1, $2) returning id`, [s.ws, name])).rows[0].id;
+    await db.query(`select seed_default_chart($1)`, [ent]);
+    return ent;
+  };
+  const net = async (accountId: string) =>
+    Number((await db.query<{ n: string | number }>(`select coalesce(sum(debit_cents - credit_cents), 0) n from journal_lines where account_id = $1`, [accountId])).rows[0].n);
+
+  it("creates a bank account tied to a property, with an opening balance posted as a transaction", async () => {
+    const ent = await newEntity("Cash LLC");
+    const prop = (await db.query<{ id: string }>(`insert into properties (workspace_id, portfolio_id, entity_id, name) values ($1,$2,$3,'Orchard') returning id`, [s.ws, s.pf, ent])).rows[0].id;
+
+    const id = (await db.query<{ id: string }>(
+      `select create_cash_account($1, 'bank', 'Orchard Checking', '6134', $2, null, 2500000, '2020-12-31') as id`, [ent, prop])).rows[0].id;
+
+    const a = (await db.query(`select type, subtype, is_bank, property_id, last4 from accounts where id = $1`, [id])).rows[0];
+    expect(a).toMatchObject({ type: "asset", subtype: "cash", is_bank: true, property_id: prop, last4: "6134" });
+    expect(await net(id)).toBe(2500000); // money in the bank: debit balance
+
+    // The offset is Opening Balance Equity, tagged with the same property.
+    const eq = (await db.query(
+      `select a.name, l.credit_cents::int c, l.property_id from journal_lines l join accounts a on a.id = l.account_id
+        where l.entry_id = (select entry_id from journal_lines where account_id = $1) and a.type = 'equity'`, [id])).rows[0];
+    expect(eq).toMatchObject({ name: "Opening Balance Equity", c: 2500000, property_id: prop });
+    const e = (await db.query(`select source, memo from journal_entries where id = (select entry_id from journal_lines where account_id = $1)`, [id])).rows[0];
+    expect(e).toMatchObject({ source: "system", memo: "Opening balance: Orchard Checking" });
+  });
+
+  it("a credit card's opening balance is money owed (a credit balance)", async () => {
+    const ent = await newEntity("Card LLC");
+    const id = (await db.query<{ id: string }>(
+      `select create_cash_account($1, 'credit_card', 'Business Card', null, null, null, 1200000, '2020-12-31') as id`, [ent])).rows[0].id;
+    expect(await net(id)).toBe(-1200000);
+    expect((await db.query(`select type, subtype, is_bank from accounts where id = $1`, [id])).rows[0]).toMatchObject({ type: "liability", subtype: "credit_card", is_bank: false });
+  });
+
+  it("a negative amount flips the side (an overdraft)", async () => {
+    const ent = await newEntity("Overdraft LLC");
+    const id = (await db.query<{ id: string }>(`select create_cash_account($1, 'bank', 'Checking 2', null, null, null, -50000, '2020-12-31') as id`, [ent])).rows[0].id;
+    expect(await net(id)).toBe(-50000);
+  });
+
+  it("can be tied to a portfolio, but not to a property and a portfolio at once", async () => {
+    const ent = await newEntity("Tie LLC");
+    const prop = (await db.query<{ id: string }>(`insert into properties (workspace_id, portfolio_id, entity_id, name) values ($1,$2,$3,'Tie House') returning id`, [s.ws, s.pf, ent])).rows[0].id;
+    const id = (await db.query<{ id: string }>(`select create_cash_account($1, 'bank', 'Portfolio Bank', null, null, $2) as id`, [ent, s.pf])).rows[0].id;
+    expect((await db.query(`select portfolio_id, property_id from accounts where id = $1`, [id])).rows[0]).toMatchObject({ portfolio_id: s.pf, property_id: null });
+    await expect(db.query(`select create_cash_account($1, 'bank', 'Both', null, $2, $3)`, [ent, prop, s.pf])).rejects.toThrow(/not both/);
+  });
+
+  it("refuses a second opening balance on the same account until the first is reversed", async () => {
+    const ent = await newEntity("Twice LLC");
+    const id = (await db.query<{ id: string }>(`select create_cash_account($1, 'bank', 'Once Bank', null, null, null, 10000, '2020-12-31') as id`, [ent])).rows[0].id;
+    await expect(db.query(`select set_account_opening_balance($1, '2020-12-31', 5000)`, [id])).rejects.toThrow(/already has an opening balance/);
+
+    const entry = (await db.query<{ entry_id: string }>(`select entry_id from journal_lines where account_id = $1`, [id])).rows[0].entry_id;
+    await db.query(`select reverse_entry($1, '2020-12-31')`, [entry]);
+    expect(await net(id)).toBe(0);
+    await db.query(`select set_account_opening_balance($1, '2020-12-31', 5000)`, [id]);
+    expect(await net(id)).toBe(5000);
+  });
+
+  it("refuses income and expense accounts and a zero amount", async () => {
+    const ent = await newEntity("Guard LLC");
+    const rent = (await db.query<{ id: string }>(`select id from accounts where entity_id = $1 and code = '4000'`, [ent])).rows[0].id;
+    await expect(db.query(`select set_account_opening_balance($1, '2020-12-31', 100)`, [rent])).rejects.toThrow(/asset and liability/);
+    const cash = (await db.query<{ id: string }>(`select id from accounts where entity_id = $1 and code = '1000'`, [ent])).rows[0].id;
+    await expect(db.query(`select set_account_opening_balance($1, '2020-12-31', 0)`, [cash])).rejects.toThrow(/Enter an opening balance/);
+  });
+
+  it("works for other balance sheet accounts too, such as a mortgage (money owed)", async () => {
+    const ent = await newEntity("Loan LLC");
+    const loan = (await db.query<{ id: string }>(`select id from accounts where entity_id = $1 and code = '2100'`, [ent])).rows[0].id;
+    await db.query(`select set_account_opening_balance($1, '2020-12-31', 7850000)`, [loan]);
+    expect(await net(loan)).toBe(-7850000);
+  });
+});

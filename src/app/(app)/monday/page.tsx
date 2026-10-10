@@ -24,13 +24,15 @@ export default async function MondayPage({ searchParams }: PageProps<"/monday">)
   const { supabase, firstName } = await getSession();
   const now = new Date();
 
-  const [entities, properties, summary, pending, recons, entries] = await Promise.all([
+  const [entities, properties, summary, pending, recons, entries, openings, undone] = await Promise.all([
     supabase.from("entities").select("id", { count: "exact", head: true }),
     supabase.from("properties").select("id, name, rental_type, portfolios(name)").order("name"),
     supabase.from("property_summary_yearly").select("property_id, year, income_cents, expense_cents"),
     supabase.from("statement_lines").select("id", { count: "exact", head: true }).eq("status", "pending"),
     supabase.from("reconciliations").select("id", { count: "exact", head: true }),
     supabase.from("journal_entries").select("id", { count: "exact", head: true }),
+    supabase.from("journal_entries").select("id", { count: "exact", head: true }).eq("source", "system").like("memo", "Opening balance:%"),
+    supabase.from("journal_entries").select("id", { count: "exact", head: true }).eq("source", "reversal").like("memo", "Reversal of Opening balance:%"),
   ]);
 
   const rows = (summary.data ?? []).map((r) => ({ ...r, income: Number(r.income_cents), expense: Number(r.expense_cents) }));
@@ -59,6 +61,9 @@ export default async function MondayPage({ searchParams }: PageProps<"/monday">)
   }
   if ((pending.count ?? 0) > 0) {
     attention.push({ title: `${pending.count} transactions are waiting for review`, detail: "Confirm or change the category so they reach your books.", href: "/review", cta: "Review" });
+  }
+  if ((entries.count ?? 0) > 0 && (openings.count ?? 0) - (undone.count ?? 0) <= 0) {
+    attention.push({ title: "Add your bank accounts and opening balances", detail: "Create your bank accounts and credit cards in Categories and enter what each held when your books begin.", href: "/categories", cta: "Set up" });
   }
   if ((entries.count ?? 0) > 0 && (recons.count ?? 0) === 0) {
     attention.push({ title: "Reconcile your accounts", detail: "Compare your books to a bank statement to prove they're right.", href: "#", cta: "Start" });

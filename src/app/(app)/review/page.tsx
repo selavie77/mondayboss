@@ -12,7 +12,7 @@ export default async function ReviewPage() {
   const { data: lines } = await supabase
     .from("statement_lines")
     .select(
-      "id, entity_id, txn_date, description, amount_cents, raw, review_reason, proposed_debit_account_id, proposed_credit_account_id, properties(name)",
+      "id, entity_id, account_id, txn_date, description, amount_cents, raw, review_reason, proposed_debit_account_id, proposed_credit_account_id, properties(name)",
     )
     .eq("status", "pending")
     .order("txn_date", { ascending: false })
@@ -22,7 +22,7 @@ export default async function ReviewPage() {
   const { data: accounts } = entityIds.length
     ? await supabase
         .from("accounts")
-        .select("id, entity_id, parent_id, code, name, type, is_bank")
+        .select("id, entity_id, parent_id, code, name, type, subtype, is_bank, last4")
         .in("entity_id", entityIds)
         .eq("is_active", true)
         .order("code")
@@ -32,6 +32,8 @@ export default async function ReviewPage() {
     id: a.id,
     entityId: a.entity_id,
     parentId: a.parent_id,
+    subtype: a.subtype,
+    last4: a.last4,
     code: a.code,
     name: a.name,
     type: a.type,
@@ -52,6 +54,7 @@ export default async function ReviewPage() {
     return {
       id: l.id,
       entityId: l.entity_id,
+      paidFromId: (l.account_id as string | null) ?? null,
       date: l.txn_date,
       description: l.description,
       amountCents: amount,

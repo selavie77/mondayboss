@@ -10,6 +10,8 @@ export interface AccountOption {
   id: string;
   entityId: string;
   parentId: string | null;
+  subtype: string | null;
+  last4: string | null;
   code: string;
   name: string;
   type: string;
@@ -19,6 +21,7 @@ export interface AccountOption {
 export interface ReviewItem {
   id: string;
   entityId: string;
+  paidFromId: string | null;
   date: string;
   description: string;
   amountCents: number;
@@ -64,7 +67,7 @@ function AccountSelect({
     <Select aria-label={label} value={value} onChange={(e) => onChange(e.target.value)} compact>
       <option value="">Choose an account…</option>
       {typeOrder.map((t) => {
-        const group = accounts.filter((a) => a.type === t && !a.isBank);
+        const group = accounts.filter((a) => a.type === t && !a.isBank && a.subtype !== "credit_card");
         if (group.length === 0) return null;
         // Categories, each followed by its subcategories (indented).
         const ordered = group
@@ -155,6 +158,9 @@ function Row({ item, accounts }: { item: ReviewItem; accounts: AccountOption[] }
   const [mode, setMode] = useState<Mode>("view");
   const [pending, start] = useTransition();
   const [error, setError] = useState<string>();
+  // Where the money came from: defaults to the property's account, and can be changed.
+  const cash = accounts.filter((a) => a.isBank || a.subtype === "credit_card");
+  const [paidFrom, setPaidFrom] = useState(item.paidFromId ?? cash[0]?.id ?? "");
 
   const run = (fn: () => Promise<ReviewResult>) =>
     start(async () => {
@@ -214,12 +220,31 @@ function Row({ item, accounts }: { item: ReviewItem; accounts: AccountOption[] }
         </div>
       )}
 
+      {mode !== "view" && cash.length > 0 && (
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
+          <label htmlFor={`paid-${item.id}`} className="text-muted">
+            {inflow ? "Deposited into" : "Paid from"}
+          </label>
+          <div className="w-full sm:w-72">
+            <Select compact id={`paid-${item.id}`} value={paidFrom} onChange={(e) => setPaidFrom(e.target.value)}>
+              {cash.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                  {a.last4 ? ` ••${a.last4}` : ""}
+                  {!a.isBank ? " (credit card)" : ""}
+                </option>
+              ))}
+            </Select>
+          </div>
+        </div>
+      )}
+
       {mode === "change" && (
         <Change
           accounts={accounts}
           pending={pending}
           onCancel={() => setMode("view")}
-          onPost={(accountId) => run(() => postLine(item.id, [{ accountId, cents: abs }]))}
+          onPost={(accountId) => run(() => postLine(item.id, [{ accountId, cents: abs }], paidFrom || undefined))}
         />
       )}
 
@@ -230,7 +255,7 @@ function Row({ item, accounts }: { item: ReviewItem; accounts: AccountOption[] }
           pending={pending}
           mortgage={item.isMortgage}
           onCancel={() => setMode("view")}
-          onPost={(parts) => run(() => postLine(item.id, parts))}
+          onPost={(parts) => run(() => postLine(item.id, parts, paidFrom || undefined))}
         />
       )}
 
