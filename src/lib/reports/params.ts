@@ -42,6 +42,11 @@ export const REPORTS: { kind: ReportKind; label: string; description: string }[]
     description: "Every account's debit and credit balance, proving that your books balance.",
   },
   {
+    kind: "account-transactions",
+    label: "Account Transactions",
+    description: "Every posting listed by transaction, with both sides shown.",
+  },
+  {
     kind: "general-ledger",
     label: "General Ledger",
     description: "Every journal entry line by account, with running balances.",

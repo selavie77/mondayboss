@@ -1,6 +1,8 @@
 import { getSession } from "@/lib/workspace";
 import { buildBalanceSheet, buildIncomeStatement, buildNetCashFlow, buildTrialBalance } from "./build";
 import { buildLedger, type LedgerAccount, type LedgerGroup, type LedgerLine } from "./ledger";
+import { classifyEntry, type TransactionKind } from "./transactionType";
+import { isCashLike } from "@/lib/paidFrom";
 import { AS_OF_REPORTS, describeRange, periodColumns, type ReportParams } from "./params";
 import type { AccountInfo, ActivityRow, Column, ReportData } from "./types";
 
@@ -411,4 +413,167 @@ export async function loadCapex(params: ReportParams): Promise<{ title: string; 
   const all = [...rows, ...fromBooks].sort((a, b) => a.spentOn.localeCompare(b.spentOn) || a.name.localeCompare(b.name));
   const through = new Date(params.to + "T00:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
   return { title: `Schedule of Capital Expense for ${label}`, subtitle: `Cumulative through ${through}`, rows: all };
+}
+
+// ---------------------------------------------------------------------------
+// Account Transactions: every posting, listed by transaction, with both sides shown
+// ---------------------------------------------------------------------------
+
+export interface TxLineView {
+  code: string;
+  account: string;
+  property: string;
+  debitCents: number;
+  creditCents: number;
+  memo: string | null;
+}
+
+export interface TxEntryView {
+  id: string;
+  date: string;
+  description: string;
+  type: TransactionKind;
+  business: string;
+  lines: TxLineView[];
+}
+
+export interface AccountTransactionsReport {
+  title: string;
+  subtitle: string;
+  entries: TxEntryView[];
+  accountOptions: { code: string; name: string }[];
+  showBusiness: boolean;
+  /** True when more transactions matched than were loaded. */
+  truncated: boolean;
+  totalDebitsCents: number;
+  totalCreditsCents: number;
+}
+
+const TX_ENTRY_CAP = 2500;
+
+type EntryRow = {
+  id: string;
+  entry_date: string;
+  memo: string | null;
+  source: string;
+  created_at: string;
+  entity_id: string;
+  journal_lines: { id: string; account_id: string; property_id: string | null; debit_cents: number | string; credit_cents: number | string; memo: string | null }[];
+};
+
+/**
+ * The transactions in the period. Filtering by account or property finds the matching transactions first,
+ * then shows every line of each one, so the other side of the entry is always visible.
+ */
+export async function loadAccountTransactions(params: ReportParams): Promise<AccountTransactionsReport> {
+  const { supabase } = await getSession();
+  const scope = await scopeFor(params);
+  const { selected, label, filtered } = scope;
+  const entityIds = scope.entities.map((e) => e.id);
+  const accounts = await fetchAccounts(supabase, entityIds);
+  const byId = new Map(accounts.map((a) => [a.id, a]));
+  const entityName = new Map(scope.entities.map((e) => [e.id, e.name]));
+  const propertyName = new Map(selected.map((p) => [p.id, p.name]));
+
+  const accountOptions = [...new Map(accounts.map((a) => [a.code, { code: a.code, name: a.name }])).values()].sort((a, b) =>
+    a.code.localeCompare(b.code, undefined, { numeric: true }),
+  );
+  const chosen = accounts.filter((a) => params.account === "all" || a.code === params.account);
+
+  // 1. Which transactions? (all of them, or those that touch the chosen account or property)
+  let entryIds: string[] | null = null;
+  if (params.account !== "all" || filtered) {
+    const found = new Set<string>();
+    for (let from = 0; chosen.length > 0 && found.size <= TX_ENTRY_CAP; from += PAGE) {
+      let q = supabase
+        .from("journal_lines")
+        .select("id, entry_id, journal_entries!inner(entry_date)")
+        .gte("journal_entries.entry_date", params.from)
+        .lte("journal_entries.entry_date", params.to)
+        .in("account_id", chosen.map((a) => a.id))
+        .order("id")
+        .range(from, from + PAGE - 1);
+      if (filtered) {
+        q = q.in(
+          "property_id",
+          selected.map((p) => p.id),
+        );
+      }
+      const { data, error } = await q;
+      if (error) throw new Error(error.message);
+      for (const l of data ?? []) found.add(l.entry_id as string);
+      if ((data?.length ?? 0) < PAGE) break;
+    }
+    entryIds = [...found];
+  }
+
+  // 2. Those transactions, each with all of its lines.
+  const columns = "id, entry_date, memo, source, created_at, entity_id, journal_lines(id, account_id, property_id, debit_cents, credit_cents, memo)";
+  const rows: EntryRow[] = [];
+  if (entryIds) {
+    for (let i = 0; i < entryIds.length; i += 100) {
+      const { data, error } = await supabase.from("journal_entries").select(columns).in("id", entryIds.slice(i, i + 100));
+      if (error) throw new Error(error.message);
+      rows.push(...((data ?? []) as unknown as EntryRow[]));
+    }
+  } else if (entityIds.length > 0) {
+    for (let from = 0; rows.length <= TX_ENTRY_CAP; from += 500) {
+      const { data, error } = await supabase
+        .from("journal_entries")
+        .select(columns)
+        .in("entity_id", entityIds)
+        .gte("entry_date", params.from)
+        .lte("entry_date", params.to)
+        .order("entry_date")
+        .order("created_at")
+        .range(from, from + 499);
+      if (error) throw new Error(error.message);
+      rows.push(...((data ?? []) as unknown as EntryRow[]));
+      if ((data?.length ?? 0) < 500) break;
+    }
+  }
+
+  rows.sort((a, b) => a.entry_date.localeCompare(b.entry_date) || a.created_at.localeCompare(b.created_at));
+  const truncated = rows.length > TX_ENTRY_CAP;
+
+  const entries: TxEntryView[] = rows.slice(0, TX_ENTRY_CAP).map((r) => {
+    const lines: TxLineView[] = r.journal_lines
+      .map((l) => {
+        const a = byId.get(l.account_id);
+        const parent = a?.parentId ? byId.get(a.parentId) : undefined;
+        return {
+          code: a?.code ?? "",
+          account: a ? `${parent ? `${parent.name} › ` : ""}${a.name}` : "(unknown account)",
+          property: l.property_id ? (propertyName.get(l.property_id) ?? "") : "",
+          debitCents: Number(l.debit_cents),
+          creditCents: Number(l.credit_cents),
+          memo: l.memo,
+        };
+      })
+      .sort((x, y) => Number(y.debitCents > 0) - Number(x.debitCents > 0)); // debits first, then credits
+    const kinds = r.journal_lines.flatMap((l) => {
+      const a = byId.get(l.account_id);
+      return a ? [{ type: a.type, cashLike: isCashLike(a) }] : [];
+    });
+    return {
+      id: r.id,
+      date: r.entry_date,
+      description: r.memo ?? "",
+      type: classifyEntry(r.source, r.memo, kinds),
+      business: entityName.get(r.entity_id) ?? "",
+      lines,
+    };
+  });
+
+  const sum = (pick: (l: TxLineView) => number) => entries.reduce((s, e) => s + e.lines.reduce((x, l) => x + pick(l), 0), 0);
+  return {
+    title: `Account Transactions for ${label}`,
+    subtitle: describeRange(params.from, params.to),
+    entries,
+    accountOptions,
+    showBusiness: scope.allEntities.length > 1,
+    truncated,
+    totalDebitsCents: sum((l) => l.debitCents),
+    totalCreditsCents: sum((l) => l.creditCents),
+  };
 }

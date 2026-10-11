@@ -4,11 +4,12 @@ import { notFound } from "next/navigation";
 import { AlertCircle, ArrowLeft } from "lucide-react";
 import { getSession } from "@/lib/workspace";
 import { findReport } from "@/lib/reports/catalog";
-import { loadCapex, loadLedger, loadReport, selectProperties } from "@/lib/reports/load";
+import { loadAccountTransactions, loadCapex, loadLedger, loadReport, selectProperties } from "@/lib/reports/load";
 import { parseParams } from "@/lib/reports/params";
 import type { ReportKind } from "@/lib/reports/types";
 import { AddCapex } from "../AddCapex";
 import { CapexTable } from "../CapexTable";
+import { AccountTransactionsTable } from "../AccountTransactionsTable";
 import { LedgerTable } from "../LedgerTable";
 import { ReportControls } from "../ReportControls";
 import { ReportTable } from "../ReportTable";
@@ -45,10 +46,12 @@ export default async function ReportPage({ params: routeParams, searchParams }: 
   const params = parseParams(sp, latest, key as ReportKind);
   const isCapex = params.report === "capital-expenses";
   const isLedger = params.report === "general-ledger";
-  const [report, capex, ledger] = await Promise.all([
-    isCapex || isLedger ? null : loadReport(params),
+  const isTx = params.report === "account-transactions";
+  const [report, capex, ledger, tx] = await Promise.all([
+    isCapex || isLedger || isTx ? null : loadReport(params),
     isCapex ? loadCapex(params) : null,
     isLedger ? loadLedger(params) : null,
+    isTx ? loadAccountTransactions(params) : null,
   ]);
 
   const defaultProperty = params.property.startsWith("p:") ? params.property.slice(2) : undefined;
@@ -74,7 +77,7 @@ export default async function ReportPage({ params: routeParams, searchParams }: 
             properties: props.all.map((p) => ({ id: p.id, name: p.name })),
             portfolios: portfolios ?? [],
             years,
-            accounts: ledger?.accountOptions,
+            accounts: ledger?.accountOptions ?? tx?.accountOptions,
             entities: (entityRows ?? []) as { id: string; name: string }[],
           }}
         />
@@ -95,6 +98,7 @@ export default async function ReportPage({ params: routeParams, searchParams }: 
       <div className="rise space-y-4">
         {report && <ReportTable data={report} cents={params.cents} />}
         {ledger && <LedgerTable report={ledger} />}
+        {tx && <AccountTransactionsTable report={tx} />}
         {capex && (
           <>
             <CapexTable {...capex} />

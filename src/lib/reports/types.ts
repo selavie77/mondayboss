@@ -70,5 +70,6 @@ export type ReportKind =
   | "capital-expenses"
   | "balance-sheet"
   | "trial-balance"
-  | "general-ledger";
+  | "general-ledger"
+  | "account-transactions";
 export type ColumnGrouping = "property" | "entity" | "month" | "quarter" | "year" | "total";

@@ -25,9 +25,10 @@ export function ReportControls({ params, options }: { params: ReportParams; opti
   const kind = params.report;
   const asOf = AS_OF_REPORTS.includes(kind);
   const isLedger = kind === "general-ledger";
+  const hasAccountFilter = isLedger || kind === "account-transactions";
   const showColumns = kind === "income-statement" || kind === "net-cash-flow" || kind === "balance-sheet";
   const showDetail = showColumns;
-  const showCents = kind !== "capital-expenses" && !isLedger;
+  const showCents = kind !== "capital-expenses" && !isLedger && kind !== "account-transactions";
 
   const go = (patch: Partial<ReportParams>) =>
     start(() => router.replace(`/reports/${params.report}?${toQuery({ ...params, ...patch }, false)}`, { scroll: false }));
@@ -143,7 +144,7 @@ export function ReportControls({ params, options }: { params: ReportParams; opti
         </div>
       )}
 
-      {isLedger && (
+      {hasAccountFilter && (
         <div className="w-full sm:w-64">
           <label className={label} htmlFor="f-account">
             Account

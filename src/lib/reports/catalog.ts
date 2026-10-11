@@ -63,6 +63,13 @@ export const CATALOG: CatalogItem[] = [
     available: true,
   },
   {
+    key: "account-transactions",
+    name: "Account Transactions",
+    description: "Every posting listed by transaction, with both sides shown: the debit and the credit each one creates.",
+    category: "accounting",
+    available: true,
+  },
+  {
     key: "general-ledger",
     name: "General Ledger",
     description: "Every journal entry line by account, with running balances.",

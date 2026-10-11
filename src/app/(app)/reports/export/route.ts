@@ -1,6 +1,6 @@
 import ExcelJS from "exceljs";
 import type { NextRequest } from "next/server";
-import { loadCapex, loadLedger, loadReport } from "@/lib/reports/load";
+import { loadAccountTransactions, loadCapex, loadLedger, loadReport } from "@/lib/reports/load";
 import { parseParams } from "@/lib/reports/params";
 
 type Cell = string | number | null;
@@ -39,6 +39,19 @@ export async function GET(request: NextRequest) {
         { style: "grand", cells: ["TOTAL CAPITAL EXPENSES", null, null, c.rows.reduce((s, r) => s + r.amountCents, 0) / 100] },
       ],
     };
+  } else if (params.report === "account-transactions") {
+    const t = await loadAccountTransactions(params);
+    const rows: Sheet["rows"] = [];
+    for (const e of t.entries) {
+      e.lines.forEach((l, i) => {
+        rows.push({
+          style: "plain",
+          cells: [i === 0 ? e.date : null, i === 0 ? e.description : null, `${l.code}  ${l.account}`, i === 0 ? e.type : null, l.property, l.debitCents ? l.debitCents / 100 : null, l.creditCents ? l.creditCents / 100 : null],
+        });
+      });
+    }
+    rows.push({ style: "grand", cells: ["TOTAL", null, null, null, null, t.totalDebitsCents / 100, t.totalCreditsCents / 100] });
+    sheet = { title: t.title, subtitle: t.subtitle, header: ["Date", "Transaction", "Account", "Type", "Property", "Debit", "Credit"], moneyFrom: 5, rows };
   } else if (params.report === "general-ledger") {
     const g = await loadLedger(params);
     const rows: Sheet["rows"] = [];
@@ -99,7 +112,7 @@ export async function GET(request: NextRequest) {
     c.border = { bottom: { style: "thin" } };
   });
 
-  const money = params.cents || params.report === "capital-expenses" || params.report === "general-ledger" ? '#,##0.00;(#,##0.00);"–"' : '#,##0;(#,##0);"–"';
+  const money = params.cents || params.report === "capital-expenses" || params.report === "general-ledger" || params.report === "account-transactions" ? '#,##0.00;(#,##0.00);"–"' : '#,##0;(#,##0);"–"';
   for (const r of sheet.rows) {
     const row = ws.addRow(r.cells);
     if (r.style === "heading") row.font = { bold: true, color: { argb: "FF145F5A" } };
