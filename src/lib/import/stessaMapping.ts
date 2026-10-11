@@ -30,6 +30,24 @@ export const CODES = {
 export const SUB_SEP = "::";
 export const acctKey = (code: string, sub?: string | null) => (sub ? `${code}${SUB_SEP}${sub}` : code);
 
+/** A destination the user picked in the matching step: an existing account, or one to create when the import runs. */
+export const existingKey = (id: string) => `id:${id}`;
+export interface NewAccountSpec {
+  /** Parent category to put it under. Null makes a new top-level category. */
+  parentId: string | null;
+  type: "asset" | "liability" | "equity" | "income" | "expense";
+  name: string;
+}
+export const newKey = (spec: NewAccountSpec) => `new:${encodeURIComponent(JSON.stringify(spec))}`;
+export function parseNewKey(key: string): NewAccountSpec | null {
+  if (!key.startsWith("new:")) return null;
+  try {
+    return JSON.parse(decodeURIComponent(key.slice(4))) as NewAccountSpec;
+  } catch {
+    return null;
+  }
+}
+
 /** Plain-English descriptions for subcategories created from Stessa sub-categories. */
 export const SUB_DESCRIPTIONS: Record<string, string> = {
   "Eviction Fees": "Court and filing costs for evicting a tenant.",

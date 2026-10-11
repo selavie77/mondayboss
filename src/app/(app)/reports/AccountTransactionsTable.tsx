@@ -8,6 +8,8 @@ const money = (c: number) => formatAmount(c, true);
 const typeStyle: Record<string, string> = {
   Expense: "bg-orange-50 text-orange-800",
   Income: "bg-emerald-50 text-emerald-800",
+  "Loan payment": "bg-indigo-50 text-indigo-800",
+  "Loan proceeds": "bg-indigo-50 text-indigo-800",
   Transfer: "bg-sky-50 text-sky-800",
   "Owner equity": "bg-violet-50 text-violet-800",
   "Opening balance": "bg-slate-100 text-slate-700",

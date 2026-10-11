@@ -432,3 +432,37 @@ describe("most common accounts", () => {
     expect(rows.map((r) => [r.code, r.uses])).toEqual([["5120", 3], ["5090", 2], ["5100", 2]]);
   });
 });
+
+describe("list_transactions", () => {
+  it("pages newest first, filters, and hides reversed entries unless asked", async () => {
+    const ent = (await db.query<{ id: string }>(`insert into entities (workspace_id, name) values ($1, 'List LLC') returning id`, [s.ws])).rows[0].id;
+    await db.query(`select seed_default_chart($1)`, [ent]);
+    const acct = async (code: string) => (await db.query<{ id: string }>(`select id from accounts where entity_id = $1 and code = $2`, [ent, code])).rows[0].id;
+    const add = async (date: string, memo: string, expense: string, cents: number) =>
+      (await db.query<{ id: string }>(`select post_entry($1, $2::date, $3, $4::jsonb) as id`, [ent, date, memo, JSON.stringify([
+        { account_id: await acct(expense), debit_cents: cents },
+        { account_id: await acct("1000"), credit_cents: cents },
+      ])])).rows[0].id;
+
+    await add("2034-01-05", "Plumber", "5090", 1000);
+    const wrong = await add("2034-02-05", "Wrong amount", "5090", 9999);
+    await add("2034-03-05", "Electric bill", "5120", 2500);
+    await db.query(`select reverse_entry($1, '2034-02-05')`, [wrong]);
+
+    const list = async (extra = "null, null, false") =>
+      (await db.query(`select * from list_transactions('2034-01-01', '2034-12-31', array[$1]::uuid[], null, ${extra}, 50, 0)`, [ent])).rows as
+        { memo: string; amount_cents: string; is_reversed: boolean; total_count: string }[];
+
+    const shown = await list();
+    expect(shown.map((r) => r.memo)).toEqual(["Electric bill", "Plumber"]); // newest first, the reversed pair hidden
+    expect(Number(shown[0].amount_cents)).toBe(2500);
+    expect(Number(shown[0].total_count)).toBe(2);
+
+    expect((await list("null, null, true")).length).toBe(4); // original, reversal and the two others
+    expect((await list("'5120', null, false")).map((r) => r.memo)).toEqual(["Electric bill"]);
+    expect((await list("null, 'plumb', false")).map((r) => r.memo)).toEqual(["Plumber"]);
+
+    const page2 = (await db.query(`select memo from list_transactions('2034-01-01', '2034-12-31', array[$1]::uuid[], null, null, null, false, 1, 1)`, [ent])).rows as { memo: string }[];
+    expect(page2.map((r) => r.memo)).toEqual(["Plumber"]);
+  });
+});

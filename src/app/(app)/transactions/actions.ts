@@ -152,3 +152,31 @@ export async function addTransaction(input: unknown): Promise<AddTransactionResu
   revalidatePath("/reports", "layout");
   return { ok: true, description: d.description, amountCents: cents };
 }
+
+/**
+ * Cancel a transaction by posting its mirror image (the books are never edited in place). The reversal
+ * is dated the same day as the original so the period's reports net to zero; if that period is locked,
+ * it is dated today instead.
+ */
+export async function reverseTransaction(entryId: string): Promise<{ ok: true } | { error: string }> {
+  const parsed = z.uuid().safeParse(entryId);
+  if (!parsed.success) return { error: "That transaction could not be found." };
+  const { supabase } = await getSession();
+
+  const { data: entry } = await supabase.from("journal_entries").select("id, entry_date, source, reverses_entry_id").eq("id", entryId).maybeSingle();
+  if (!entry) return { error: "That transaction could not be found." };
+  if (entry.reverses_entry_id) return { error: "That is already a reversal." };
+  if (entry.source === "system") return { error: "Opening balances are changed on the account in Categories." };
+
+  let result = await supabase.rpc("reverse_entry", { p_entry_id: entryId, p_entry_date: entry.entry_date });
+  if (result.error && /lock/i.test(result.error.message)) {
+    result = await supabase.rpc("reverse_entry", { p_entry_id: entryId, p_entry_date: new Date().toISOString().slice(0, 10) });
+  }
+  if (result.error) {
+    return { error: /duplicate key|one_reversal/i.test(result.error.message) ? "That transaction has already been reversed." : result.error.message };
+  }
+
+  for (const p of ["/transactions", "/monday", "/categories", "/review"]) revalidatePath(p);
+  revalidatePath("/reports", "layout");
+  return { ok: true };
+}

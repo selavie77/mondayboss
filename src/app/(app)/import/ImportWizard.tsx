@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useMemo, useRef, useState, useTransition } from "react";
 import { CheckCircle2, FileSpreadsheet, FileText, UploadCloud, X } from "lucide-react";
-import { PortfolioSelect } from "@/components/PortfolioSelect";
 import { CREATE_VALUE, CreateAccountDialog } from "@/components/create-dialogs";
 import { Button, Card, Field, Notice, Select } from "@/components/ui";
 import { formatCents } from "@/lib/money";
@@ -19,6 +18,8 @@ import {
   type DateFormat,
   type ParsedStatement,
 } from "@/lib/import/statement";
+import { initialMatch, nameProblems, toMappingPayload, unconfirmed, type MatchState } from "@/lib/import/matchState";
+import { StessaMapping } from "./StessaMapping";
 import { commitStatement, commitStessa, previewStessa, type ImportResult, type StatementResult, type StessaPreview } from "./actions";
 
 export interface EntityOption {
@@ -157,8 +158,9 @@ const longDate = (d: string) => new Date(d + "T00:00:00").toLocaleDateString("en
 function StessaImport({ entities, portfolios }: { entities: EntityOption[]; portfolios: PortfolioOption[] }) {
   const [files, setFiles] = useState<File[]>([]);
   const [entityId, setEntityId] = useState(entities[0]?.id ?? "");
-  const [portfolioId, setPortfolioId] = useState(portfolios[0]?.id ?? "");
+  const [portfolioId] = useState(portfolios[0]?.id ?? "");
   const [preview, setPreview] = useState<StessaPreview | null>(null);
+  const [match, setMatch] = useState<MatchState | null>(null);
   const [result, setResult] = useState<ImportResult | null>(null);
   const [error, setError] = useState<string>();
   const [pending, start] = useTransition();
@@ -167,6 +169,7 @@ function StessaImport({ entities, portfolios }: { entities: EntityOption[]; port
     const fd = new FormData();
     fd.set("entity_id", entityId);
     fd.set("portfolio_id", portfolioId);
+    if (match) fd.set("mapping", JSON.stringify(toMappingPayload(match)));
     for (const f of files) fd.append("files", f);
     return fd;
   };
@@ -174,6 +177,7 @@ function StessaImport({ entities, portfolios }: { entities: EntityOption[]; port
   const reset = () => {
     setFiles([]);
     setPreview(null);
+    setMatch(null);
     setResult(null);
     setError(undefined);
   };
@@ -198,7 +202,10 @@ function StessaImport({ entities, portfolios }: { entities: EntityOption[]; port
             <p className="text-sm text-muted">
               {result.imported.toLocaleString("en-US")} transactions imported
               {result.duplicates > 0 ? `, ${result.duplicates.toLocaleString("en-US")} skipped because they were already imported` : ""}.
+              {result.createdPortfolios > 0 && ` Created ${result.createdPortfolios} new ${result.createdPortfolios === 1 ? "portfolio" : "portfolios"}.`}
               {result.createdProperties.length > 0 && ` Created ${result.createdProperties.length} new ${result.createdProperties.length === 1 ? "property" : "properties"}.`}
+              {result.createdAccounts > 0 && ` Created ${result.createdAccounts} new ${result.createdAccounts === 1 ? "account" : "accounts"}.`}
+              {result.createdCategories > 0 && ` Created ${result.createdCategories} new ${result.createdCategories === 1 ? "category" : "categories"}.`}
             </p>
           </div>
         </div>
@@ -227,6 +234,9 @@ function StessaImport({ entities, portfolios }: { entities: EntityOption[]; port
   if (preview) {
     const t = preview.totals;
     const fresh = t.rows - t.duplicates;
+    const todo = match ? unconfirmed(preview.setup, match) : { properties: [], sources: [] };
+    const toConfirm = todo.properties.length + todo.sources.length;
+    const problems = match ? nameProblems(match) : [];
     return (
       <Card className="space-y-5 p-6">
         <div>
@@ -270,6 +280,16 @@ function StessaImport({ entities, portfolios }: { entities: EntityOption[]; port
           </div>
         )}
 
+        {match && (
+          <StessaMapping
+            setup={preview.setup}
+            state={match}
+            onChange={setMatch}
+            portfolios={portfolios}
+            defaultPortfolioId={portfolioId}
+          />
+        )}
+
         <div className="overflow-x-auto rounded-xl border border-border">
           <table className="w-full text-sm">
             <thead>
@@ -308,19 +328,18 @@ function StessaImport({ entities, portfolios }: { entities: EntityOption[]; port
           </Notice>
         )}
 
-        {preview.newProperties.length > 0 && portfolios.length > 0 && (
-          <div className="max-w-sm">
-            <label htmlFor="new-props-portfolio" className="mb-1.5 block text-sm font-medium">
-              {`Add the ${preview.newProperties.length} new ${preview.newProperties.length === 1 ? "property" : "properties"} to portfolio`}
-            </label>
-            <PortfolioSelect id="new-props-portfolio" options={portfolios} value={portfolioId} onChange={setPortfolioId} />
-          </div>
+        {toConfirm > 0 && (
+          <Notice tone="info">
+            {toConfirm} {toConfirm === 1 ? "match looks similar to" : "matches look similar to"} something you already have. Confirm {toConfirm === 1 ? "it" : "them"} above, or change the match, before importing.
+          </Notice>
         )}
-
+        {problems.map((m) => (
+          <Notice key={m}>{m}</Notice>
+        ))}
         {error && <Notice>{error}</Notice>}
         <div className="flex flex-wrap gap-2">
           <Button
-            disabled={pending || fresh === 0}
+            disabled={pending || fresh === 0 || toConfirm > 0 || problems.length > 0}
             onClick={() =>
               start(async () => {
                 setError(undefined);
@@ -332,7 +351,14 @@ function StessaImport({ entities, portfolios }: { entities: EntityOption[]; port
           >
             {pending ? "Importing…" : fresh === 0 ? "Nothing new to import" : `Import ${fresh.toLocaleString("en-US")} transactions`}
           </Button>
-          <Button variant="ghost" onClick={() => setPreview(null)} disabled={pending}>
+          <Button
+            variant="ghost"
+            onClick={() => {
+              setPreview(null);
+              setMatch(null);
+            }}
+            disabled={pending}
+          >
             Back
           </Button>
         </div>
@@ -394,7 +420,10 @@ function StessaImport({ entities, portfolios }: { entities: EntityOption[]; port
             setError(undefined);
             const r = await previewStessa(form());
             if (r.error) setError(r.error);
-            else if (r.preview) setPreview(r.preview);
+            else if (r.preview) {
+              setPreview(r.preview);
+              setMatch(initialMatch(r.preview.setup, portfolioId));
+            }
           })
         }
       >

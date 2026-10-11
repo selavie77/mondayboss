@@ -11,6 +11,8 @@ export interface StessaRow {
   subCategory: string | null;
   amountCents: number; // signed: money in positive, money out negative
   property: string;
+  /** Stessa's Portfolio column. */
+  portfolio: string;
   source: string;
   account: string;
   dedupeHash: string;
@@ -100,6 +102,7 @@ export function readStessaSheet(ws: ExcelJS.Worksheet): StessaLedger {
       subCategory: cell(7) || null,
       amountCents,
       property: rowProperty,
+      portfolio: cell(9),
       source: cell(12),
       account: cell(13),
       dedupeHash: createHash("sha1").update(`${base}|${n}`).digest("hex"),

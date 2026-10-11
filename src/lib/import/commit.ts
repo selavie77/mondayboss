@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ImportPlan, DraftEntry, UnresolvedRow } from "./stessaEntries";
-import { CODES, SUB_DESCRIPTIONS, SUB_SEP } from "./stessaMapping";
+import type { StessaRow } from "./stessa";
+import { CODES, SUB_DESCRIPTIONS, SUB_SEP, parseNewKey } from "./stessaMapping";
 
 export interface CommitOptions {
   workspaceId: string;
@@ -14,6 +15,8 @@ export interface CommitOptions {
   bankCode?: string;
   /** The account a property's transactions are paid from by default (see resolvePaidFrom). */
   cashAccountFor?: (propertyName: string) => string | null;
+  /** The cash account a particular row belongs to (its Stessa data source). Falls back to cashAccountFor. */
+  cashAccountForRow?: (row: StessaRow) => string | null;
 }
 
 export interface CommitResult {
@@ -51,6 +54,18 @@ export async function commitImportPlan(supabase: SupabaseClient, o: CommitOption
     o.accountIds.set(CODES.transfers, made.data as string);
   }
 
+  // Create the accounts the user asked for in the matching step ("new:" keys), then register their ids.
+  const wanted = new Set([...plan.entries, ...plan.review].flatMap((d) => [d.debitCode, d.creditCode]).filter((k) => k.startsWith("new:")));
+  for (const key of wanted) {
+    const spec = parseNewKey(key);
+    if (!spec) throw new Error("A category you chose could not be created.");
+    const made = spec.parentId
+      ? await supabase.rpc("ensure_subaccount", { p_parent_id: spec.parentId, p_name: spec.name })
+      : await supabase.rpc("create_account", { p_entity_id: o.entityId, p_parent_id: null, p_type: spec.type, p_name: spec.name });
+    if (made.error) throw new Error(`Could not create "${spec.name}": ${made.error.message}`);
+    o.accountIds.set(key, made.data as string);
+  }
+
   // Create any subcategories the plan refers to (e.g. "5090::Plumbing Repairs") and register their ids.
   const keys = new Set(
     [...plan.entries, ...plan.review].flatMap((d) => [d.debitCode, d.creditCode]).filter((k) => k.includes(SUB_SEP)),
@@ -71,9 +86,9 @@ export async function commitImportPlan(supabase: SupabaseClient, o: CommitOption
   // The cash side of a transaction goes to the property's own bank account or card when it has one,
   // otherwise to the general account.
   const cashCode = o.bankCode ?? "1000";
-  const cashFor = (propertyName: string) => o.cashAccountFor?.(propertyName) ?? o.accountIds.get(cashCode) ?? null;
-  const resolve = (code: string | undefined, propertyName: string) =>
-    code === undefined ? null : code === cashCode ? cashFor(propertyName) : (o.accountIds.get(code) ?? null);
+  const cashFor = (row: StessaRow) => o.cashAccountForRow?.(row) ?? o.cashAccountFor?.(row.property) ?? o.accountIds.get(cashCode) ?? null;
+  const resolve = (code: string | undefined, row: StessaRow) =>
+    code === undefined ? null : code.startsWith("id:") ? code.slice(3) : code === cashCode ? cashFor(row) : (o.accountIds.get(code) ?? null);
 
   type Staged = { entry?: DraftEntry; held?: DraftEntry; unresolved?: UnresolvedRow };
   const staged: Staged[] = [
@@ -89,7 +104,7 @@ export async function commitImportPlan(supabase: SupabaseClient, o: CommitOption
       workspace_id: o.workspaceId,
       entity_id: o.entityId,
       batch_id: batchId,
-      account_id: cashFor(row.property),
+      account_id: cashFor(row),
       property_id: o.propertyIds.get(row.property) ?? null,
       txn_date: row.date,
       description: [row.name, row.notes].filter(Boolean).join(" - ") || "(no description)",
@@ -97,8 +112,8 @@ export async function commitImportPlan(supabase: SupabaseClient, o: CommitOption
       raw: { category: row.category, subCategory: row.subCategory, source: row.source, account: row.account, details: row.details },
       dedupe_hash: row.dedupeHash,
       review_reason: s.held ? s.held.warnings.join("; ") : (s.unresolved?.reason ?? null),
-      proposed_debit_account_id: s.held ? resolve(s.held.debitCode, row.property) : null,
-      proposed_credit_account_id: s.held ? resolve(s.held.creditCode, row.property) : null,
+      proposed_debit_account_id: s.held ? resolve(s.held.debitCode, row) : null,
+      proposed_credit_account_id: s.held ? resolve(s.held.creditCode, row) : null,
     };
   };
 
@@ -120,14 +135,15 @@ export async function commitImportPlan(supabase: SupabaseClient, o: CommitOption
     // was posted, so retry one by one to say exactly which row is the problem.
     const items: { line_id: string; lines: object[]; label: string }[] = [];
     for (const s of slice) {
-      if (!s.entry) continue;
-      const id = idByHash.get(s.entry.dedupeHash);
+      const entry = s.entry;
+      if (!entry) continue;
+      const id = idByHash.get(entry.dedupeHash);
       if (!id) continue; // already imported earlier
       items.push({
         line_id: id,
-        label: `${s.entry.date} ${s.entry.memo}`,
-        lines: s.entry.lines.map((l) => ({
-          account_id: resolve(l.accountCode, l.property),
+        label: `${entry.date} ${entry.memo}`,
+        lines: entry.lines.map((l) => ({
+          account_id: resolve(l.accountCode, entry.row),
           property_id: o.propertyIds.get(l.property) ?? null,
           debit_cents: l.debitCents,
           credit_cents: l.creditCents,

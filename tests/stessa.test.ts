@@ -4,7 +4,7 @@ import type { StessaLedger, StessaRow } from "@/lib/import/stessa";
 
 const row = (over: Partial<StessaRow>): StessaRow => ({
   date: "2021-03-01", name: "x", notes: "", details: "", category: "Income", subCategory: "Rents",
-  amountCents: 105000, property: "1 Main St", source: "", account: "", dedupeHash: Math.random().toString(),
+  amountCents: 105000, property: "1 Main St", portfolio: "", source: "", account: "", dedupeHash: Math.random().toString(),
   ...over,
 });
 const plan = (...rows: StessaRow[]) =>

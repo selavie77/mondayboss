@@ -553,7 +553,7 @@ export async function loadAccountTransactions(params: ReportParams): Promise<Acc
       .sort((x, y) => Number(y.debitCents > 0) - Number(x.debitCents > 0)); // debits first, then credits
     const kinds = r.journal_lines.flatMap((l) => {
       const a = byId.get(l.account_id);
-      return a ? [{ type: a.type, cashLike: isCashLike(a) }] : [];
+      return a ? [{ type: a.type, cashLike: isCashLike(a), loan: a.subtype === "loan", debit: Number(l.debit_cents) > 0 }] : [];
     });
     return {
       id: r.id,

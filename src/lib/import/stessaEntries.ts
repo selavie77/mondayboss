@@ -1,5 +1,6 @@
 import type { StessaLedger, StessaRow } from "./stessa";
-import { CODES, acctKey, isUnresolved, mapStessaRow, refundNote } from "./stessaMapping";
+import { categoryKey } from "./stessaMatch";
+import { CODES, acctKey, isUnresolved, mapStessaRow, refundNote, type Mapped, type Unresolved } from "./stessaMapping";
 
 export interface DraftLine {
   /** Account key: a code, or "code::Subcategory" (see acctKey). */
@@ -43,14 +44,21 @@ export interface ImportPlan {
  * Anything doubtful goes to `review` and anything unclassifiable to `unresolved`;
  * neither is posted without a person's say-so.
  */
-export function planStessaImport(ledgers: StessaLedger[]): ImportPlan {
+export interface PlanOptions {
+  /** Stessa category key ("Category|Sub-Category") -> the account key the user chose for it (see existingKey / newKey). */
+  categoryOverrides?: Map<string, string>;
+}
+
+export function planStessaImport(ledgers: StessaLedger[], opts: PlanOptions = {}): ImportPlan {
   const entries: DraftEntry[] = [];
   const review: DraftEntry[] = [];
   const unresolved: UnresolvedRow[] = [];
 
   for (const ledger of ledgers) {
     for (const row of ledger.rows) {
-      const m = mapStessaRow(row);
+      // A category the user matched themselves is final: no rule, review flag or "unknown category" applies.
+      const chosen = opts.categoryOverrides?.get(categoryKey(row));
+      const m: Mapped | Unresolved = chosen ? { counterCode: chosen } : mapStessaRow(row);
       if (isUnresolved(m)) {
         unresolved.push({ row, reason: m.reason });
         continue;
