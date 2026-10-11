@@ -466,3 +466,44 @@ describe("list_transactions", () => {
     expect(page2.map((r) => r.memo)).toEqual(["Plumber"]);
   });
 });
+
+describe("opening balances by property", () => {
+  it("allows one per account and property, and lists activity without counting openings", async () => {
+    const ent = (await db.query<{ id: string }>(`insert into entities (workspace_id, name) values ($1, 'Opening LLC') returning id`, [s.ws])).rows[0].id;
+    await db.query(`select seed_default_chart($1)`, [ent]);
+    const port = (await db.query<{ id: string }>(`select id from portfolios where workspace_id = $1 limit 1`, [s.ws])).rows[0].id;
+    const prop = async (name: string) =>
+      (await db.query<{ id: string }>(`insert into properties (workspace_id, portfolio_id, entity_id, name) values ($1, $2, $3, $4) returning id`, [s.ws, port, ent, name])).rows[0].id;
+    const a = await prop("A House");
+    const b = await prop("B House");
+    const acct = async (code: string) => (await db.query<{ id: string }>(`select id from accounts where entity_id = $1 and code = $2`, [ent, code])).rows[0].id;
+    const mortgage = await acct("2100");
+    const cash = await acct("1000");
+
+    // A principal payment on each property.
+    for (const [p, cents] of [[a, 10000], [b, 20000]] as const) {
+      await db.query(`select post_entry($1, '2035-02-01'::date, 'Principal', $2::jsonb)`, [ent, JSON.stringify([
+        { account_id: mortgage, property_id: p, debit_cents: cents },
+        { account_id: cash, property_id: p, credit_cents: cents },
+      ])]);
+    }
+
+    // Opening balances for the same loan on two properties are fine; a second one for the same property is not.
+    await db.query(`select set_account_opening_balance($1, '2035-01-31'::date, 9000000, $2)`, [mortgage, a]);
+    await db.query(`select set_account_opening_balance($1, '2035-01-31'::date, 15000000, $2)`, [mortgage, b]);
+    await expect(db.query(`select set_account_opening_balance($1, '2035-01-31'::date, 1, $2)`, [mortgage, a])).rejects.toThrow(/already has an opening balance/);
+
+    const rows = (await db.query(
+      `select account_id, property_id, movement_cents::int m, line_count::int n from opening_candidates($1, '2035-12-31')`, [ent])).rows as
+      { account_id: string; property_id: string; m: number; n: number }[];
+    const loan = rows.filter((r) => r.account_id === mortgage);
+    // Payments reduce what is owed (-100.00 and -200.00); the opening entries are not counted as activity.
+    expect(loan.map((r) => [r.property_id === a ? "A" : "B", r.m, r.n]).sort()).toEqual([["A", -10000, 1], ["B", -20000, 1]]);
+    expect(rows.find((r) => r.account_id === cash && r.property_id === a)?.m).toBe(-10000);
+
+    // Only activity up to the date counts.
+    const early = (await db.query(`select movement_cents::int m from opening_candidates($1, '2035-01-01') where account_id = $2 and property_id = $3`, [ent, mortgage, a])).rows[0] as { m: number };
+    expect(early.m).toBe(0);
+  });
+});
+

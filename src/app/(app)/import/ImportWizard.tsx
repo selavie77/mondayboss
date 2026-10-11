@@ -220,6 +220,9 @@ function StessaImport({ entities, portfolios }: { entities: EntityOption[]; port
               Review {result.pending.toLocaleString("en-US")} transactions
             </Link>
           )}
+          <Link href="/opening-balances" className="inline-flex h-11 items-center rounded-xl border border-border-strong bg-surface px-5 font-medium hover:bg-brand-50">
+            Set opening balances
+          </Link>
           <Link href="/reports" className="inline-flex h-11 items-center rounded-xl border border-border-strong bg-surface px-5 font-medium hover:bg-brand-50">
             View reports
           </Link>

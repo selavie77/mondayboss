@@ -127,6 +127,7 @@ export async function createCashAccount(_prev: AccountResult | undefined, formDa
 
 function revalidateAccounts() {
   revalidatePath("/categories");
+  revalidatePath("/opening-balances");
   revalidatePath("/review");
   revalidatePath("/monday");
   revalidatePath("/reports", "layout");

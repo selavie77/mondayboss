@@ -127,7 +127,11 @@ export default async function CategoriesPage({ searchParams }: PageProps<"/categ
                 <span className="ml-2 font-normal normal-case tracking-normal text-subtle">Where money is paid from and into</span>
               </h2>
               <p className="mt-1 max-w-2xl text-sm text-muted">
-                Tie an account to a property or a portfolio and new transactions on it will be paid from that account by default. You can always pick a different one. Enter each account&apos;s opening balance here.
+                Tie an account to a property or a portfolio and new transactions on it will be paid from that account by default. You can always pick a different one. Enter each account&apos;s opening balance here, or set them all at once on the{" "}
+                <Link href="/opening-balances" className="font-medium text-brand-700 underline underline-offset-2">
+                  Opening balances
+                </Link>{" "}
+                page.
               </p>
             </div>
             <Card className="overflow-hidden">
