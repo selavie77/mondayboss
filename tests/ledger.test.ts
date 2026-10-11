@@ -507,3 +507,46 @@ describe("opening balances by property", () => {
   });
 });
 
+describe("selling a property", () => {
+  it("reads what the books hold for the property and posts a balanced sale entry", async () => {
+    const ent = (await db.query<{ id: string }>(`insert into entities (workspace_id, name) values ($1, 'Sale LLC') returning id`, [s.ws])).rows[0].id;
+    await db.query(`select seed_default_chart($1)`, [ent]);
+    const port = (await db.query<{ id: string }>(`select id from portfolios where workspace_id = $1 limit 1`, [s.ws])).rows[0].id;
+    const prop = (await db.query<{ id: string }>(`insert into properties (workspace_id, portfolio_id, entity_id, name) values ($1, $2, $3, 'Sold House') returning id`, [s.ws, port, ent])).rows[0].id;
+    const acct = async (code: string) => (await db.query<{ id: string }>(`select id from accounts where entity_id = $1 and code = $2`, [ent, code])).rows[0].id;
+    const post = (date: string, memo: string, lines: object[]) => db.query(`select post_entry($1, $2::date, $3, $4::jsonb) as id`, [ent, date, memo, JSON.stringify(lines)]);
+
+    const cost = await acct("1200");
+    const loan = await acct("2100");
+    const cash = await acct("1000");
+    // Bought for $90,000 cash plus a $60,000 loan; $5,000 deposit-free; nothing else.
+    await post("2035-01-05", "Purchase", [
+      { account_id: cost, property_id: prop, debit_cents: 15000000 },
+      { account_id: loan, property_id: prop, credit_cents: 6000000 },
+      { account_id: cash, property_id: prop, credit_cents: 9000000 },
+    ]);
+
+    const facts = async (through: string) =>
+      Object.fromEntries(((await db.query(`select kind, sum(cents)::int c from property_sale_facts($1, $2) group by kind`, [prop, through])).rows as { kind: string; c: number }[]).map((r) => [r.kind, r.c]));
+    expect(await facts("2035-12-31")).toEqual({ cost: 15000000, loan: 6000000 });
+    expect(await facts("2034-12-31")).toEqual({}); // before the purchase
+
+    // The gain account is created once.
+    const g1 = (await db.query<{ id: string }>(`select ensure_sale_gain_account($1) as id`, [ent])).rows[0].id;
+    const g2 = (await db.query<{ id: string }>(`select ensure_sale_gain_account($1) as id`, [ent])).rows[0].id;
+    expect(g1).toBe(g2);
+    expect((await db.query(`select type, subtype from accounts where id = $1`, [g1])).rows[0]).toEqual({ type: "income", subtype: "sale_gain" });
+
+    // Sold for $200,000, $10,000 of costs, $60,000 payoff: cash $130,000, gain $40,000.
+    await post("2035-06-01", "Sale", [
+      { account_id: cash, property_id: prop, debit_cents: 13000000 },
+      { account_id: loan, property_id: prop, debit_cents: 6000000 },
+      { account_id: cost, property_id: prop, credit_cents: 15000000 },
+      { account_id: g1, property_id: prop, credit_cents: 4000000 },
+    ]);
+    expect(await facts("2035-12-31")).toEqual({});
+    const tb = (await db.query(`select sum(debit_cents)::int d, sum(credit_cents)::int c from trial_balance where entity_id = $1`, [ent])).rows[0] as { d: number; c: number };
+    expect(tb.d).toBe(tb.c);
+  });
+});
+

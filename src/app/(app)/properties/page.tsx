@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { Building2 } from "lucide-react";
 import { Card } from "@/components/ui";
 import { getSession } from "@/lib/workspace";
@@ -16,7 +17,7 @@ const rentalLabel: Record<string, string> = {
 export default async function PropertiesPage() {
   const { supabase } = await getSession();
   const [{ data: properties }, { data: entities }, { data: portfolios }] = await Promise.all([
-    supabase.from("properties").select("id, name, city, state, rental_type, entities(name), portfolios(name)").order("name"),
+    supabase.from("properties").select("id, name, city, state, rental_type, sold_on, entities(name), portfolios(name)").order("name"),
     supabase.from("entities").select("id, name").order("name"),
     supabase.from("portfolios").select("id, name").order("name"),
   ]);
@@ -51,6 +52,12 @@ export default async function PropertiesPage() {
                     <p className="text-sm">{portfolio?.name}</p>
                     <p className="text-[13px] text-muted">{rentalLabel[p.rental_type]}</p>
                   </div>
+                  <Link
+                    href={`/properties/${p.id}/sale`}
+                    className={`shrink-0 rounded-xl px-3 py-1.5 text-sm font-medium ${p.sold_on ? "bg-slate-100 text-slate-700 hover:bg-slate-200" : "border border-border-strong bg-surface text-foreground hover:bg-brand-50"}`}
+                  >
+                    {p.sold_on ? `Sold ${new Date(p.sold_on + "T00:00:00").toLocaleDateString("en-US", { month: "short", year: "numeric" })}` : "Record sale"}
+                  </Link>
                 </li>
               );
             })}

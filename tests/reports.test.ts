@@ -213,3 +213,43 @@ describe("General ledger grouping", () => {
     expect(groups.map((g) => g.account.id)).toEqual(["cash"]);
   });
 });
+
+describe("a property sale in the reports", () => {
+  const accts: AccountInfo[] = [
+    acct("cash", "1000", "Operating Checking", "asset", "cash", null, true),
+    acct("cost", "1200", "Rental Property (Cost)", "asset", "fixed_asset"),
+    acct("loan", "2100", "Mortgage Payable", "liability", "loan"),
+    acct("rent", "4000", "Rental Income", "income", "rent"),
+    acct("gain", "4200", "Gain (Loss) on Sale of Property", "income", "sale_gain"),
+  ];
+  // One year of $1,000 rent, then a sale: $52,000 cash in, $60,000 loan paid off, $90,000 cost removed, $22,000 gain.
+  const act: ActivityRow[] = [
+    { columnKey: "p", accountId: "rent", netCents: -100000 },
+    { columnKey: "p", accountId: "gain", netCents: -2200000 },
+    { columnKey: "p", accountId: "cost", netCents: -9000000 },
+    { columnKey: "p", accountId: "loan", netCents: 6000000 },
+    { columnKey: "p", accountId: "cash", netCents: 5200000 + 100000 },
+  ];
+  const input = { accounts: accts, activity: act, columns: [{ key: "p", label: "Total" }], subtitle: "", options: { detail: "sub" as const, showTotal: false } };
+
+  it("keeps the gain out of rental income and reports it on its own", () => {
+    const r = buildIncomeStatement(input);
+    expect(row(r, "TOTAL INCOME")).toEqual([100000]);
+    expect(row(r, "NET OPERATING INCOME")).toEqual([100000]);
+    expect(r.rows.some((x) => x.label === "SALE OF PROPERTY")).toBe(true);
+    expect(row(r, "TOTAL GAIN (LOSS) ON SALE")).toEqual([2200000]);
+    expect(row(r, "NET INCOME INCLUDING SALES")).toEqual([2300000]);
+  });
+
+  it("shows no sale section when there was no sale", () => {
+    const r = buildIncomeStatement({ ...input, activity: act.filter((a) => a.accountId === "rent") });
+    expect(r.rows.some((x) => x.label === "SALE OF PROPERTY")).toBe(false);
+  });
+
+  it("counts the sale in net cash flow: cost recovered plus the gain, less the loan paid off", () => {
+    const r = buildNetCashFlow(input);
+    expect(row(r, "TOTAL SALE OF PROPERTY")).toEqual([2200000]);
+    // rent 1,000 + cost 90,000 recovered + gain 22,000 - loan 60,000 = 53,000 (the cash that arrived)
+    expect(row(r, "NET CASH FLOW")).toEqual([5300000]);
+  });
+});

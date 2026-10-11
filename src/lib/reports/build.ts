@@ -92,6 +92,8 @@ interface Category {
   children: Map<string, Vec>;
 }
 
+const isSaleGain = (a: AccountInfo) => a.type === "income" && a.subtype === "sale_gain";
+const isIncome = (a: AccountInfo) => a.type === "income" && a.subtype !== "sale_gain";
 const isOpex = (a: AccountInfo) => a.type === "expense" && a.subtype !== "interest" && a.subtype !== "depreciation";
 const isInterest = (a: AccountInfo) => a.type === "expense" && a.subtype === "interest";
 const isDepreciation = (a: AccountInfo) => a.type === "expense" && a.subtype === "depreciation";
@@ -176,7 +178,7 @@ export function buildIncomeStatement(input: Input): ReportData {
   const r = new Report(L.n, input.options);
 
   r.heading("INCOME");
-  const income = r.categories(L.categories((a) => a.type === "income"), -1);
+  const income = r.categories(L.categories(isIncome), -1);
   r.summary("TOTAL INCOME", income);
   r.gap();
 
@@ -187,6 +189,7 @@ export function buildIncomeStatement(input: Input): ReportData {
 
   const noi = sub(income, opex);
   r.line("NET OPERATING INCOME", noi, "grand");
+  let net = noi;
 
   const below = L.categories((a) => isInterest(a) || isDepreciation(a));
   if (below.some((c) => !isZero(add(c.own, [...c.children.values()].reduce((s, v) => add(s, v), zeros(L.n)))))) {
@@ -195,7 +198,19 @@ export function buildIncomeStatement(input: Input): ReportData {
     const other = r.categories(below, 1);
     r.summary("TOTAL INTEREST & DEPRECIATION", other);
     r.gap();
-    r.line("NET INCOME", sub(noi, other), "grand");
+    net = sub(noi, other);
+    r.line("NET INCOME", net, "grand");
+  }
+
+  // A sale's gain or loss is reported on its own, not as rental income.
+  const gains = L.categories(isSaleGain);
+  if (gains.some((c) => !isZero(add(c.own, [...c.children.values()].reduce((s, v) => add(s, v), zeros(L.n)))))) {
+    r.gap();
+    r.heading("SALE OF PROPERTY");
+    const gain = r.categories(gains, -1);
+    r.summary("TOTAL GAIN (LOSS) ON SALE", gain);
+    r.gap();
+    r.line("NET INCOME INCLUDING SALES", add(net, gain), "grand");
   }
   return finish("Income Statement", input, r);
 }
@@ -205,7 +220,7 @@ export function buildNetCashFlow(input: Input): ReportData {
   const r = new Report(L.n, input.options);
 
   r.heading("INCOME");
-  const income = r.categories(L.categories((a) => a.type === "income"), -1);
+  const income = r.categories(L.categories(isIncome), -1);
   r.summary("TOTAL INCOME", income);
   r.gap();
 
@@ -233,7 +248,16 @@ export function buildNetCashFlow(input: Input): ReportData {
   r.summary("TOTAL CAPITAL EXPENSES", capex, "total");
   r.gap();
 
-  const ncf = sub(sub(noi, debtService), capex);
+  // Selling a property: its cost comes off capital expenses above, and the gain or loss makes up the rest of the cash.
+  const saleGain = scale(L.sum(isSaleGain), -1);
+  if (!isZero(saleGain)) {
+    r.heading("SALE OF PROPERTY");
+    r.line("Gain (loss) on sale", saleGain, "subline");
+    r.summary("TOTAL SALE OF PROPERTY", saleGain, "total");
+    r.gap();
+  }
+
+  const ncf = add(sub(sub(noi, debtService), capex), saleGain);
   r.line("NET CASH FLOW", ncf, "grand");
   r.line("NCF Before Principal Payments", add(ncf, principal), "total");
   r.gap();
