@@ -41,6 +41,16 @@ export async function commitImportPlan(supabase: SupabaseClient, o: CommitOption
   if (batch.error) throw batch.error;
   const batchId = batch.data.id as string;
 
+  // The general Transfers account is created the first time a plan needs it (before its subcategories).
+  const usesTransfers = [...plan.entries, ...plan.review].some((d) =>
+    [d.debitCode, d.creditCode].some((k) => k.split(SUB_SEP)[0] === CODES.transfers),
+  );
+  if (usesTransfers && !o.accountIds.has(CODES.transfers)) {
+    const made = await supabase.rpc("ensure_transfers_account", { p_entity_id: o.entityId });
+    if (made.error) throw made.error;
+    o.accountIds.set(CODES.transfers, made.data as string);
+  }
+
   // Create any subcategories the plan refers to (e.g. "5090::Plumbing Repairs") and register their ids.
   const keys = new Set(
     [...plan.entries, ...plan.review].flatMap((d) => [d.debitCode, d.creditCode]).filter((k) => k.includes(SUB_SEP)),
@@ -56,14 +66,6 @@ export async function commitImportPlan(supabase: SupabaseClient, o: CommitOption
     });
     if (made.error) throw made.error;
     o.accountIds.set(key, made.data as string);
-  }
-
-  // The general Transfers account is created the first time a plan needs it.
-  const needsTransfers = [...plan.entries, ...plan.review].some((d) => d.debitCode === CODES.transfers || d.creditCode === CODES.transfers);
-  if (needsTransfers && !o.accountIds.has(CODES.transfers)) {
-    const made = await supabase.rpc("ensure_transfers_account", { p_entity_id: o.entityId });
-    if (made.error) throw made.error;
-    o.accountIds.set(CODES.transfers, made.data as string);
   }
 
   // The cash side of a transaction goes to the property's own bank account or card when it has one,

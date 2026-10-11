@@ -4,6 +4,7 @@ import type { StessaRow } from "./stessa";
 export const CODES = {
   cash: "1000",
   escrow: "1100",
+  propertyCost: "1200",
   deposits: "2000",
   mortgage: "2100",
   contributions: "3000",
@@ -42,6 +43,12 @@ export const SUB_DESCRIPTIONS: Record<string, string> = {
   Electric: "Electric service for the property.",
   "Bank Fees": "Monthly account, wire and similar bank fees.",
   "Property Management": "Monthly fees charged by your property manager.",
+  "New Acquisitions": "The purchase price of a property plus closing costs. This is the starting point for depreciation.",
+  "New Appliances": "Appliances bought for a rental. Usually depreciated over 5 years.",
+  "New Flooring & Carpet": "New flooring or carpet. Usually depreciated over 5 years.",
+  Remodeling: "Remodeling and major improvements that add to a property's value. Usually depreciated over 27.5 years.",
+  "Proceeds & Payoffs": "Loan proceeds received, or a loan paid off, such as when a property is sold or refinanced.",
+  "Sale Proceeds": "Money received from selling a property. Record the sale and any gain or loss separately.",
   "Payments not yet split":
     "Mortgage payments that were recorded without a principal, interest and escrow split. Split them when you have the lender's statement.",
 };
@@ -86,6 +93,7 @@ export function mapStessaRow(row: StessaRow): Mapped | Unresolved {
       if (sub === "Mortgage Principal") return { counterCode: CODES.mortgage };
       // No split was available when this was recorded. Count it as debt service (principal) so cash flow
       // still adds up, in its own subcategory so it is easy to find and split later.
+      if (sub) return { counterCode: CODES.mortgage, sub }; // e.g. "Proceeds & Payoffs"
       return {
         counterCode: CODES.mortgage,
         sub: "Payments not yet split",
@@ -107,7 +115,12 @@ export function mapStessaRow(row: StessaRow): Mapped | Unresolved {
         }
         return { counterCode: CODES.escrow, review: "Escrow refund or other disbursement" };
       }
+      if (sub) return { counterCode: CODES.transfers, sub, note: `Transfers \u203a ${sub} posted to Transfers` };
       return { counterCode: CODES.transfers, note: "Transfers with no sub-category posted to Transfers" };
+
+    // Purchases and improvements are capital: they add to the cost of the property instead of being an expense.
+    case "Capital Expenses":
+      return { counterCode: CODES.propertyCost, sub: sub ?? undefined };
 
     case "Repairs & Maintenance":
       if (sub && REPAIRS_TO_CLEANING.has(sub)) return { counterCode: CODES.cleaning };

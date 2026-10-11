@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState, useState } from "react";
+import { PortfolioSelect } from "@/components/PortfolioSelect";
 import { Button, Field, Input, Notice, Select } from "@/components/ui";
 import { createEntity, createProperty, type FormState } from "./actions";
 
@@ -44,7 +45,7 @@ export function PropertyForm({
   defaultEntityId?: string;
 }) {
   const [state, action, pending] = useActionState<FormState, FormData>(createProperty, undefined);
-  const [newPortfolio, setNewPortfolio] = useState(false);
+  const [portfolioId, setPortfolioId] = useState(portfolios[0]?.id ?? "");
 
   return (
     <form action={action} className="space-y-5">
@@ -73,28 +74,11 @@ export function PropertyForm({
       </div>
 
       <div>
-        {newPortfolio ? (
-          <Field label="New portfolio name">
-            <Input name="new_portfolio" placeholder="Ohio rentals" required />
-          </Field>
-        ) : (
-          <Field label="Portfolio">
-            <Select name="portfolio_id" defaultValue={portfolios[0]?.id}>
-              {portfolios.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </Select>
-          </Field>
-        )}
-        <button
-          type="button"
-          onClick={() => setNewPortfolio((v) => !v)}
-          className="mt-2 text-sm font-medium text-brand-700 hover:underline"
-        >
-          {newPortfolio ? "Use an existing portfolio" : "+ Create a new portfolio"}
-        </button>
+        <label htmlFor="property-portfolio" className="mb-1.5 block text-sm font-medium">
+          Portfolio
+        </label>
+        <PortfolioSelect id="property-portfolio" options={portfolios} value={portfolioId} onChange={setPortfolioId} />
+        <input type="hidden" name="portfolio_id" value={portfolioId} />
       </div>
 
       <Field label="Street address (optional)">

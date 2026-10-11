@@ -33,7 +33,12 @@ export function CapexTable({ title, subtitle, rows }: { title: string; subtitle:
               {rows.map((r) => (
                 <tr key={r.id}>
                   <td className="num border-t border-border px-4 py-2.5">{date(r.spentOn)}</td>
-                  <td className="border-t border-border px-4 py-2.5 font-medium">{r.name}</td>
+                  <td className="border-t border-border px-4 py-2.5 font-medium">
+                    {r.name}
+                    <span className={`ml-2 rounded-full px-2 py-0.5 text-[11px] font-semibold ${r.source === "books" ? "bg-brand-50 text-brand-700" : "bg-border text-muted"}`}>
+                      {r.source === "books" ? "In your books" : "Added by hand"}
+                    </span>
+                  </td>
                   <td className="border-t border-border px-4 py-2.5 text-muted">{r.subCategory}</td>
                   <td className="num border-t border-border px-4 py-2.5 text-right">{formatAmount(r.amountCents, false)}</td>
                   <td className="num border-t border-border px-4 py-2.5">{date(r.placedInService)}</td>

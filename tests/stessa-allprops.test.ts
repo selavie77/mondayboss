@@ -45,6 +45,22 @@ describe("Stessa exports that cover one property or all of them", () => {
   });
 });
 
+describe("rows with no property", () => {
+  const noProperty = { date: "03/05/2021", name: "Bank adjustment", amount: -78, property: "", category: "Admin & Other", sub: "Bank Fees" };
+
+  it("in an all-properties export have no property, and do not create one called All Properties", () => {
+    const ledger = readStessaSheet(sheet("General Ledger for All Properties", [row, noProperty]));
+    expect(ledger.properties).toEqual(["1 Main St"]);
+    expect(ledger.rows.find((r) => r.name === "Bank adjustment")!.property).toBe("");
+  });
+
+  it("in a one-property export still belong to that property", () => {
+    const ledger = readStessaSheet(sheet("General Ledger for 1 Main St", [noProperty]));
+    expect(ledger.rows[0].property).toBe("1 Main St");
+    expect(ledger.properties).toEqual(["1 Main St"]);
+  });
+});
+
 // Your real exports. Skipped when the files are not on this machine.
 const PER_PROPERTY = "G:/My Drive/Corporation/Taxes/2021/Properties";
 const FILES = [

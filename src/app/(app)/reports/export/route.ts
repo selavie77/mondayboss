@@ -29,12 +29,12 @@ export async function GET(request: NextRequest) {
     sheet = {
       title: c.title,
       subtitle: c.subtitle,
-      header: ["Date", "Name", "Type", "Amount", "Placed in service", "Useful life (years)", "Property", "Portfolio", "Notes"],
+      header: ["Date", "Name", "Type", "Amount", "Placed in service", "Useful life (years)", "Property", "Portfolio", "Notes", "Source"],
       moneyFrom: 3,
       rows: [
         ...c.rows.map((r) => ({
           style: "plain" as const,
-          cells: [r.spentOn, r.name, r.subCategory, r.amountCents / 100, r.placedInService, r.usefulLife, r.property, r.portfolio, r.notes] as Cell[],
+          cells: [r.spentOn, r.name, r.subCategory, r.amountCents / 100, r.placedInService, r.usefulLife, r.property, r.portfolio, r.notes, r.source === "books" ? "In your books" : "Added by hand"] as Cell[],
         })),
         { style: "grand", cells: ["TOTAL CAPITAL EXPENSES", null, null, c.rows.reduce((s, r) => s + r.amountCents, 0) / 100] },
       ],

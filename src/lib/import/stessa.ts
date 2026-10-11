@@ -82,7 +82,9 @@ export function readStessaSheet(ws: ExcelJS.Worksheet): StessaLedger {
 
     // The row's own property (not the file title), so the same transaction has the same fingerprint
     // whether it came from a one-property file or an all-properties file.
-    const rowProperty = cell(10) || propertyName;
+    // A one-property file's title names the property. In an all-properties export a row with no property
+    // really has none, so it must not inherit the title ("All Properties") as if it were a property.
+    const rowProperty = cell(10) || (/^all properties$/i.test(propertyName) ? "" : propertyName);
 
     // Identical rows (same rent every month) are legitimate, so number the repeats.
     const base = [rowProperty, date, cell(3), cell(4), cell(5), cell(6), cell(7), amountCents].join("|");
@@ -104,5 +106,5 @@ export function readStessaSheet(ws: ExcelJS.Worksheet): StessaLedger {
     });
   });
 
-  return { propertyName, properties: [...new Set(rows.map((r) => r.property))], rows, skippedRows: skipped };
+  return { propertyName, properties: [...new Set(rows.map((r) => r.property).filter(Boolean))], rows, skippedRows: skipped };
 }

@@ -2,6 +2,8 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { ArrowRight, Check, Plus, Scissors, Tag, X } from "lucide-react";
+import type { CreatedAccount } from "@/app/(app)/create-actions";
+import { CREATE_VALUE, CreateAccountDialog, CreateCategoryDialog } from "@/components/create-dialogs";
 import { Button, Card, Input, Notice, Select } from "@/components/ui";
 import { formatCents, toCents } from "@/lib/money";
 import { acceptLines, ignoreLine, postLine, type ReviewResult } from "./actions";
@@ -70,16 +72,24 @@ function AccountSelect({
   onChange,
   label,
   transfers = [],
+  onCreate,
 }: {
   accounts: AccountOption[];
   value: string;
   onChange: (v: string) => void;
   label: string;
+  /** Called when "Create new category…" is chosen; call `done(id)` to select the new category. */
+  onCreate?: (done: (accountId: string) => void) => void;
   /** Other bank accounts and cards, for moving money between your own accounts (a card payment, for example). */
   transfers?: TransferOption[];
 }) {
   return (
-    <Select aria-label={label} value={value} onChange={(e) => onChange(e.target.value)} compact>
+    <Select
+      aria-label={label}
+      value={value}
+      onChange={(e) => (e.target.value === CREATE_VALUE && onCreate ? onCreate(onChange) : onChange(e.target.value))}
+      compact
+    >
       <option value="">Choose an account…</option>
       {typeOrder.map((t) => {
         const group = accounts.filter((a) => a.type === t && !a.isBank && a.subtype !== "credit_card");
@@ -107,6 +117,7 @@ function AccountSelect({
           ))}
         </optgroup>
       )}
+      {onCreate && <option value={CREATE_VALUE}>＋ Create new category…</option>}
     </Select>
   );
 }
@@ -194,8 +205,18 @@ function Row({ item, accounts, properties }: { item: ReviewItem; accounts: Accou
   const [mode, setMode] = useState<Mode>("view");
   const [pending, start] = useTransition();
   const [error, setError] = useState<string>();
+  // Accounts created from a dropdown on this row appear right away, before the page reloads.
+  const [extras, setExtras] = useState<AccountOption[]>([]);
+  const [creating, setCreating] = useState<null | { kind: "category"; done: (id: string) => void } | { kind: "account" }>(null);
+  const allAccounts = [...accounts, ...extras.filter((e) => !accounts.some((a) => a.id === e.id))];
+  const addExtra = (c: CreatedAccount) =>
+    setExtras((prev) => [
+      ...prev,
+      { id: c.id, entityId: c.entityId, parentId: c.parentId, subtype: c.subtype, last4: c.last4, code: c.code, name: c.name, type: c.type, isBank: c.isBank },
+    ]);
+
   // Where the money came from: defaults to the property's account, and can be changed.
-  const cash = accounts.filter((a) => a.isBank || a.subtype === "credit_card");
+  const cash = allAccounts.filter((a) => a.isBank || a.subtype === "credit_card");
   const [paidFrom, setPaidFrom] = useState(item.paidFromId ?? cash[0]?.id ?? "");
   const [propertyId, setPropertyId] = useState(item.propertyId ?? "");
   const transfers: TransferOption[] = cash
@@ -266,7 +287,12 @@ function Row({ item, accounts, properties }: { item: ReviewItem; accounts: Accou
             {inflow ? "Deposited into" : "Paid from"}
           </label>
           <div className="w-full sm:w-64">
-            <Select compact id={`paid-${item.id}`} value={paidFrom} onChange={(e) => setPaidFrom(e.target.value)}>
+            <Select
+              compact
+              id={`paid-${item.id}`}
+              value={paidFrom}
+              onChange={(e) => (e.target.value === CREATE_VALUE ? setCreating({ kind: "account" }) : setPaidFrom(e.target.value))}
+            >
               {cash.map((a) => (
                 <option key={a.id} value={a.id}>
                   {a.name}
@@ -274,6 +300,7 @@ function Row({ item, accounts, properties }: { item: ReviewItem; accounts: Accou
                   {!a.isBank ? " (credit card)" : ""}
                 </option>
               ))}
+              <option value={CREATE_VALUE}>＋ Create new bank account or card…</option>
             </Select>
           </div>
           {properties.length > 0 && (
@@ -298,7 +325,8 @@ function Row({ item, accounts, properties }: { item: ReviewItem; accounts: Accou
 
       {mode === "change" && (
         <Change
-          accounts={accounts}
+          accounts={allAccounts}
+          onCreate={(done) => setCreating({ kind: "category", done })}
           pending={pending}
           onCancel={() => setMode("view")}
           transfers={transfers}
@@ -308,7 +336,8 @@ function Row({ item, accounts, properties }: { item: ReviewItem; accounts: Accou
 
       {mode === "split" && (
         <Split
-          accounts={accounts}
+          accounts={allAccounts}
+          onCreate={(done) => setCreating({ kind: "category", done })}
           totalCents={abs}
           pending={pending}
           mortgage={item.isMortgage}
@@ -323,6 +352,30 @@ function Row({ item, accounts, properties }: { item: ReviewItem; accounts: Accou
           <Notice>{error}</Notice>
         </div>
       )}
+
+      <CreateCategoryDialog
+        open={creating?.kind === "category"}
+        onClose={() => setCreating(null)}
+        entityId={item.entityId}
+        defaultType={inflow ? "income" : "expense"}
+        candidates={allAccounts.filter((a) => !a.parentId && !a.isBank && a.subtype !== "credit_card").map((a) => ({ id: a.id, name: a.name, type: a.type }))}
+        onCreated={(c) => {
+          addExtra(c);
+          if (creating?.kind === "category") creating.done(c.id);
+          setCreating(null);
+        }}
+      />
+      <CreateAccountDialog
+        open={creating?.kind === "account"}
+        onClose={() => setCreating(null)}
+        entities={[{ id: item.entityId, name: "" }]}
+        defaultEntityId={item.entityId}
+        onCreated={(c) => {
+          addExtra(c);
+          setPaidFrom(c.id);
+          setCreating(null);
+        }}
+      />
     </li>
   );
 }
@@ -330,12 +383,14 @@ function Row({ item, accounts, properties }: { item: ReviewItem; accounts: Accou
 function Change({
   accounts,
   transfers,
+  onCreate,
   pending,
   onCancel,
   onPost,
 }: {
   accounts: AccountOption[];
   transfers: TransferOption[];
+  onCreate: (done: (accountId: string) => void) => void;
   pending: boolean;
   onCancel: () => void;
   onPost: (accountId: string) => void;
@@ -344,7 +399,7 @@ function Change({
   return (
     <div className="mt-3 flex flex-wrap items-center gap-2">
       <div className="w-full sm:w-80">
-        <AccountSelect accounts={accounts} transfers={transfers} value={accountId} onChange={setAccountId} label="Category" />
+        <AccountSelect accounts={accounts} transfers={transfers} onCreate={onCreate} value={accountId} onChange={setAccountId} label="Category" />
       </div>
       <Button size="sm" disabled={!accountId || pending} onClick={() => onPost(accountId)}>
         {pending ? "Posting…" : "Post to books"}
@@ -365,6 +420,7 @@ interface Part {
 function Split({
   accounts,
   transfers,
+  onCreate,
   totalCents,
   pending,
   mortgage,
@@ -373,6 +429,7 @@ function Split({
 }: {
   accounts: AccountOption[];
   transfers: TransferOption[];
+  onCreate: (done: (accountId: string) => void) => void;
   totalCents: number;
   pending: boolean;
   mortgage: boolean;
@@ -417,7 +474,7 @@ function Split({
             <li key={p.key} className="grid items-center gap-2 sm:grid-cols-[1fr_9rem_2rem]">
               <div>
                 {nameFor(code) && <span className="mb-1 block text-xs font-medium text-muted">{nameFor(code)}</span>}
-                <AccountSelect accounts={accounts} transfers={transfers} value={p.accountId} onChange={(v) => update(p.key, { accountId: v })} label="Account" />
+                <AccountSelect accounts={accounts} transfers={transfers} onCreate={onCreate} value={p.accountId} onChange={(v) => update(p.key, { accountId: v })} label="Account" />
               </div>
               <Input
                 aria-label="Amount"

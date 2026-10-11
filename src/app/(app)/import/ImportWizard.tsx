@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useMemo, useRef, useState, useTransition } from "react";
 import { CheckCircle2, FileSpreadsheet, FileText, UploadCloud, X } from "lucide-react";
+import { PortfolioSelect } from "@/components/PortfolioSelect";
+import { CREATE_VALUE, CreateAccountDialog } from "@/components/create-dialogs";
 import { Button, Card, Field, Notice, Select } from "@/components/ui";
 import { formatCents } from "@/lib/money";
 import {
@@ -74,7 +76,7 @@ export function ImportWizard({
       {tab === "stessa" ? (
         <StessaImport entities={entities} portfolios={portfolios} />
       ) : (
-        <StatementImport accounts={accounts} />
+        <StatementImport accounts={accounts} entities={entities} />
       )}
     </div>
   );
@@ -308,15 +310,10 @@ function StessaImport({ entities, portfolios }: { entities: EntityOption[]; port
 
         {preview.newProperties.length > 0 && portfolios.length > 0 && (
           <div className="max-w-sm">
-            <Field label={`Add the ${preview.newProperties.length} new ${preview.newProperties.length === 1 ? "property" : "properties"} to portfolio`}>
-              <Select value={portfolioId} onChange={(e) => setPortfolioId(e.target.value)}>
-                {portfolios.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </Select>
-            </Field>
+            <label htmlFor="new-props-portfolio" className="mb-1.5 block text-sm font-medium">
+              {`Add the ${preview.newProperties.length} new ${preview.newProperties.length === 1 ? "property" : "properties"} to portfolio`}
+            </label>
+            <PortfolioSelect id="new-props-portfolio" options={portfolios} value={portfolioId} onChange={setPortfolioId} />
           </div>
         )}
 
@@ -411,8 +408,11 @@ function StessaImport({ entities, portfolios }: { entities: EntityOption[]; port
 // Bank or card statement
 // ---------------------------------------------------------------------------
 
-function StatementImport({ accounts }: { accounts: CashAccountOption[] }) {
+function StatementImport({ accounts, entities }: { accounts: CashAccountOption[]; entities: EntityOption[] }) {
   const [accountId, setAccountId] = useState(accounts[0]?.id ?? "");
+  const [extraAccounts, setExtraAccounts] = useState<CashAccountOption[]>([]);
+  const [creatingAccount, setCreatingAccount] = useState(false);
+  const allAccounts = [...accounts, ...extraAccounts.filter((e) => !accounts.some((a) => a.id === e.id))];
   const [fileName, setFileName] = useState("");
   const [table, setTable] = useState<CsvTable | null>(null);
   const [mapping, setMapping] = useState<ColumnMapping | null>(null);
@@ -422,7 +422,7 @@ function StatementImport({ accounts }: { accounts: CashAccountOption[] }) {
   const [error, setError] = useState<string>();
   const [pending, start] = useTransition();
 
-  const account = accounts.find((a) => a.id === accountId);
+  const account = allAccounts.find((a) => a.id === accountId);
 
   const parsed: ParsedStatement | null = useMemo(() => {
     if (ofx) return ofx;
@@ -481,11 +481,25 @@ function StatementImport({ accounts }: { accounts: CashAccountOption[] }) {
     setMapping({ ...m, flip: charges && Boolean(account?.isCard) });
   }
 
-  if (accounts.length === 0) {
+  const accountDialog = (
+    <CreateAccountDialog
+      open={creatingAccount}
+      onClose={() => setCreatingAccount(false)}
+      entities={entities}
+      onCreated={(a) => {
+        setExtraAccounts((prev) => [...prev, { id: a.id, name: a.name, last4: a.last4, isCard: !a.isBank, scope: "All properties" }]);
+        setAccountId(a.id);
+        setCreatingAccount(false);
+      }}
+    />
+  );
+
+  if (allAccounts.length === 0) {
     return (
-      <Card className="p-8 text-center text-muted">
-        Add a bank account or credit card first, then import its statement.{" "}
-        <Link href="/categories" className="font-medium text-brand-700 underline">Go to Categories</Link>
+      <Card className="space-y-4 p-8 text-center text-muted">
+        <p>Add a bank account or credit card first, then import its statement.</p>
+        <Button onClick={() => setCreatingAccount(true)}>Create a bank account or credit card</Button>
+        {accountDialog}
       </Card>
     );
   }
@@ -555,17 +569,24 @@ function StatementImport({ accounts }: { accounts: CashAccountOption[] }) {
       </div>
 
       <div className="max-w-md">
-        <Field label="Which account is this for?">
-          <Select value={accountId} onChange={(e) => setAccountId(e.target.value)}>
-            {accounts.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.name}
-                {a.last4 ? ` ••${a.last4}` : ""} {a.isCard ? "(credit card)" : ""}
-              </option>
-            ))}
-          </Select>
-        </Field>
+        <label htmlFor="statement-account" className="mb-1.5 block text-sm font-medium">
+          Which account is this for?
+        </label>
+        <Select
+          id="statement-account"
+          value={accountId}
+          onChange={(e) => (e.target.value === CREATE_VALUE ? setCreatingAccount(true) : setAccountId(e.target.value))}
+        >
+          {allAccounts.map((a) => (
+            <option key={a.id} value={a.id}>
+              {a.name}
+              {a.last4 ? ` ••${a.last4}` : ""} {a.isCard ? "(credit card)" : ""}
+            </option>
+          ))}
+          <option value={CREATE_VALUE}>＋ Create new bank account or credit card…</option>
+        </Select>
         {account && <p className="mt-1.5 text-[13px] text-muted">Used for: {account.scope}</p>}
+        {accountDialog}
       </div>
 
       {!parsed && (

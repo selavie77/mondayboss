@@ -79,20 +79,21 @@ async function main() {
   const acc = await supabase.from("accounts").select("id, code").eq("entity_id", entityId);
   for (const a of acc.data ?? []) accounts.set(a.code, a.id);
 
+  // Properties come from the rows (a file can cover one property or all of them), as in the app.
   const props = new Map<string, string>();
-  for (const l of ledgers) {
-    const found = await supabase.from("properties").select("id").eq("name", l.propertyName).maybeSingle();
+  for (const name of new Set(ledgers.flatMap((l) => l.properties))) {
+    const found = await supabase.from("properties").select("id").eq("name", name).maybeSingle();
     if (found.data) {
-      props.set(l.propertyName, found.data.id);
+      props.set(name, found.data.id);
       continue;
     }
     const ins = await supabase
       .from("properties")
-      .insert({ workspace_id: workspaceId, portfolio_id: portfolio!.id, entity_id: entityId, name: l.propertyName })
+      .insert({ workspace_id: workspaceId, portfolio_id: portfolio!.id, entity_id: entityId, name })
       .select("id")
       .single();
     if (ins.error) throw ins.error;
-    props.set(l.propertyName, ins.data.id);
+    props.set(name, ins.data.id);
   }
 
   const cash = await supabase.from("accounts").select("id, code, is_bank, subtype, property_id, portfolio_id").eq("entity_id", entityId);
@@ -118,7 +119,7 @@ async function main() {
     propertyIds: props,
   });
   console.log(
-    `${ledgers.length} properties: ${result.imported} rows imported (${result.posted} posted, ${result.pending} waiting for review), ${result.duplicates} already imported.`,
+    `${props.size} properties: ${result.imported} rows imported (${result.posted} posted, ${result.pending} waiting for review), ${result.duplicates} already imported.`,
   );
 }
 

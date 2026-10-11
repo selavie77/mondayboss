@@ -267,6 +267,69 @@ export async function loadLedger(params: ReportParams): Promise<LedgerReport> {
   };
 }
 
+/** Typical recovery period shown for items posted to the books (appliances and flooring: 5 years; the rest: 27.5). */
+const lifeFor = (name: string) => (/appliance|carpet|flooring|furnish/i.test(name) ? 5 : 27.5);
+
+/**
+ * Purchases and improvements posted to Rental Property (Cost) or its subcategories. Opening balances are left
+ * out: they are a starting balance, not a purchase, and are entered in the register with their own dates.
+ */
+async function capexFromBooks(
+  supabase: SupabaseServer,
+  selected: { id: string; name: string; entity_id: string; portfolios: { name: string } | null }[],
+  filtered: boolean,
+  to: string,
+): Promise<CapexRow[]> {
+  const entityIds = [...new Set(selected.map((p) => p.entity_id))];
+  const accounts = await fetchAccounts(supabase, entityIds);
+  const fixed = accounts.filter((a) => a.type === "asset" && a.subtype === "fixed_asset");
+  if (fixed.length === 0) return [];
+  const byId = new Map(accounts.map((a) => [a.id, a]));
+  const propertyById = new Map(selected.map((p) => [p.id, p]));
+
+  const out: CapexRow[] = [];
+  for (let from = 0; ; from += PAGE) {
+    let q = supabase
+      .from("journal_lines")
+      .select("id, account_id, property_id, debit_cents, credit_cents, memo, journal_entries!inner(entry_date, memo, source)")
+      .in("account_id", fixed.map((a) => a.id))
+      .neq("journal_entries.source", "system")
+      .lte("journal_entries.entry_date", to)
+      .order("id")
+      .range(from, from + PAGE - 1);
+    if (filtered) {
+      q = q.in(
+        "property_id",
+        selected.map((p) => p.id),
+      );
+    }
+    const { data, error } = await q;
+    if (error) throw new Error(error.message);
+    for (const l of data ?? []) {
+      const e = l.journal_entries as unknown as { entry_date: string; memo: string | null };
+      const acct = byId.get(l.account_id as string);
+      const cents = Number(l.debit_cents) - Number(l.credit_cents);
+      if (!acct || cents === 0) continue;
+      const prop = l.property_id ? propertyById.get(l.property_id as string) : undefined;
+      out.push({
+        id: l.id as string,
+        name: (l.memo as string | null) || e.memo || acct.name,
+        subCategory: acct.name,
+        amountCents: cents,
+        spentOn: e.entry_date,
+        placedInService: e.entry_date,
+        usefulLife: lifeFor(acct.name),
+        property: prop?.name ?? "",
+        portfolio: prop?.portfolios?.name ?? "",
+        notes: null,
+        source: "books",
+      });
+    }
+    if ((data?.length ?? 0) < PAGE) break;
+  }
+  return out;
+}
+
 export interface CapexRow {
   id: string;
   name: string;
@@ -278,6 +341,8 @@ export interface CapexRow {
   property: string;
   portfolio: string;
   notes: string | null;
+  /** "books" = posted to Rental Property (Cost); "manual" = added to the register by hand. */
+  source: "books" | "manual";
 }
 
 /** Capital expenses up to the end of the period (it is a cumulative schedule). */
@@ -311,8 +376,12 @@ export async function loadCapex(params: ReportParams): Promise<{ title: string; 
       property: prop?.name ?? "",
       portfolio: prop?.portfolios?.name ?? "",
       notes: r.notes,
+      source: "manual" as const,
     };
   });
+
+  const fromBooks = await capexFromBooks(supabase, selected, filtered, params.to);
+  const all = [...rows, ...fromBooks].sort((a, b) => a.spentOn.localeCompare(b.spentOn) || a.name.localeCompare(b.name));
   const through = new Date(params.to + "T00:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
-  return { title: `Schedule of Capital Expense for ${label}`, subtitle: `Cumulative through ${through}`, rows };
+  return { title: `Schedule of Capital Expense for ${label}`, subtitle: `Cumulative through ${through}`, rows: all };
 }
