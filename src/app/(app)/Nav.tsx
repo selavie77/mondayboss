@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BookOpen, Building2, FileBarChart, FolderTree, ListChecks, Sun, Upload } from "lucide-react";
+import { BookOpen, Building2, CheckCheck, FileBarChart, FolderTree, ListChecks, Sun, Upload } from "lucide-react";
 
 const items = [
   { href: "/monday", label: "Monday", icon: Sun },
   { href: "/review", label: "Review", icon: ListChecks, badge: true },
   { href: "/transactions", label: "Transactions", icon: BookOpen },
+  { href: "/reconcile", label: "Reconcile", icon: CheckCheck },
   { href: "/properties", label: "Properties", icon: Building2 },
   { href: "/categories", label: "Categories", icon: FolderTree },
   { href: "/import", label: "Import", icon: Upload },

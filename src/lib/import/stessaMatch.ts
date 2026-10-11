@@ -56,7 +56,7 @@ export function isManualSource(source: string, account: string): boolean {
 }
 
 export interface SourceSuggestion {
-  /** Post to the property's usual account. */
+  /** No bank of its own: post to the general account. */
   kind: "default" | "existing" | "create";
   existingId?: string;
   existingName?: string;

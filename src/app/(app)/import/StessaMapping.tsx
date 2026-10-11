@@ -262,7 +262,7 @@ export function StessaMapping({
                     else setSource(s.key, { kind: "existing", id: v });
                   }}
                 >
-                  <option value={DEFAULT}>Use the property&apos;s usual account</option>
+                  <option value={DEFAULT}>Use the general account (Operating Checking)</option>
                   {setup.cashAccounts.map((a) => (
                     <option key={a.id} value={a.id}>
                       {a.name}

@@ -308,8 +308,6 @@ export async function commitStessa(formData: FormData): Promise<{ error?: string
     for (const p of made ?? []) propertyIds.set(p.name as string, p.id as string);
     ctx = await loadImportContext(supabase, entity.data);
   }
-  const propertyInfo = new Map([...ctx.properties.values()].map((p) => [p.id, p]));
-  const byName = new Map([...propertyIds].map(([name, pid]) => [name, { id: pid, portfolioId: propertyInfo.get(pid)?.portfolioId ?? null }]));
 
   // 2. Data sources: each one posts to the account it was matched to, or a new bank account / card.
   const sourceAccounts = new Map<string, string>(); // source key -> cash account id
@@ -364,7 +362,8 @@ export async function commitStessa(formData: FormData): Promise<{ error?: string
       plan,
       accountIds: ctx.accountIds,
       propertyIds,
-      cashAccountFor: (name) => resolvePaidFrom(byName.get(name) ?? null, ctx.cashAccounts),
+      // A row with no data source goes to the general account. Accounts made from data sources belong to their own rows only.
+      cashAccountFor: () => resolvePaidFrom(null, ctx.cashAccounts),
       cashAccountForRow: (row) => sourceAccounts.get(sourceKey(row.source, row.account)) ?? null,
     });
 
@@ -483,4 +482,35 @@ export async function commitStatement(input: unknown): Promise<{ error?: string;
 
   refresh();
   return { result: { imported, duplicates: rows.length - imported, accountName: acct.name } };
+}
+
+/**
+ * Undo an import: reverse every transaction it posted and remove what is still waiting in Review, so the same
+ * file can be imported again. Properties, accounts and portfolios the import created are kept.
+ */
+export async function undoImport(batchId: string): Promise<{ error?: string; reversed?: number; removed?: number }> {
+  if (!z.uuid().safeParse(batchId).success) return { error: "That import was not found." };
+  const { supabase } = await getSession();
+
+  const { data: summary } = await supabase.from("import_batch_summary").select("imported, posted").eq("batch_id", batchId).maybeSingle();
+  if (!summary) return { error: "That import was not found." };
+
+  // Reverse in steps, so a large import does not run into the database's time limit.
+  let reversed = 0;
+  for (let step = 0; step < 200; step++) {
+    const { data, error } = await supabase.rpc("undo_import_batch", { p_batch_id: batchId, p_limit: 300 });
+    if (error) {
+      const progress = reversed > 0 ? ` ${reversed.toLocaleString("en-US")} transactions were reversed before it stopped. Fix the problem and undo again to finish.` : "";
+      return { error: `${error.message}${progress}` };
+    }
+    const r = (data as { reversed: number; remaining: number; done: boolean }[])[0];
+    reversed += r?.reversed ?? 0;
+    if (r?.done) {
+      refresh();
+      revalidatePath("/transactions");
+      return { reversed, removed: summary.imported as number };
+    }
+  }
+  refresh();
+  return { error: "That import is very large. Undo it again to finish." };
 }

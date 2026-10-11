@@ -4,6 +4,7 @@ import { Card } from "@/components/ui";
 import { isCashLike } from "@/lib/paidFrom";
 import { getSession } from "@/lib/workspace";
 import { ImportWizard, type CashAccountOption } from "./ImportWizard";
+import { UndoImportButton } from "./UndoImportButton";
 
 export const metadata: Metadata = { title: "Import" };
 
@@ -14,7 +15,7 @@ export default async function ImportPage() {
     supabase.from("entities").select("id, name").order("name"),
     supabase.from("portfolios").select("id, name").order("name"),
     supabase.from("accounts").select("id, code, name, last4, is_bank, subtype, property_id, portfolio_id").eq("is_active", true).order("code"),
-    supabase.from("import_batch_summary").select("batch_id, source, filename, created_at, imported, posted, pending, ignored").order("created_at", { ascending: false }).limit(15),
+    supabase.from("import_batch_summary").select("batch_id, source, filename, created_at, imported, posted, pending, ignored, undone_at").order("created_at", { ascending: false }).limit(15),
     supabase.from("properties").select("id, name"),
   ]);
 
@@ -61,12 +62,13 @@ export default async function ImportPage() {
                     <th scope="col" className="px-3 py-2.5">File</th>
                     <th scope="col" className="px-3 py-2.5 text-right">Imported</th>
                     <th scope="col" className="px-3 py-2.5 text-right">Posted</th>
-                    <th scope="col" className="px-5 py-2.5 text-right">Waiting</th>
+                    <th scope="col" className="px-3 py-2.5 text-right">Waiting</th>
+                    <th scope="col" className="px-5 py-2.5 text-right" />
                   </tr>
                 </thead>
                 <tbody>
                   {history!.map((h) => (
-                    <tr key={h.batch_id} className="border-t border-border/70">
+                    <tr key={h.batch_id} className={`border-t border-border/70 ${h.undone_at ? "text-muted" : ""}`}>
                       <td className="whitespace-nowrap px-5 py-2.5">
                         {new Date(h.created_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
                       </td>
@@ -76,13 +78,20 @@ export default async function ImportPage() {
                       </td>
                       <td className="num px-3 py-2.5 text-right">{h.imported.toLocaleString("en-US")}</td>
                       <td className="num px-3 py-2.5 text-right">{h.posted.toLocaleString("en-US")}</td>
-                      <td className="num px-5 py-2.5 text-right">
+                      <td className="num px-3 py-2.5 text-right">
                         {h.pending > 0 ? (
                           <Link href="/review" className="font-semibold text-warning-fg underline underline-offset-2">
                             {h.pending.toLocaleString("en-US")}
                           </Link>
                         ) : (
                           "–"
+                        )}
+                      </td>
+                      <td className="whitespace-nowrap px-5 py-2.5 text-right">
+                        {h.undone_at ? (
+                          <span className="rounded-full bg-border px-2.5 py-0.5 text-xs font-medium">Undone</span>
+                        ) : (
+                          <UndoImportButton batchId={h.batch_id} posted={h.posted} pending={h.pending} filename={h.filename} />
                         )}
                       </td>
                     </tr>
