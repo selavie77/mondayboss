@@ -41,12 +41,12 @@ type ActivityResult = { bucket: string; property_id: string | null; account_id: 
 /** Read every page of the report_activity query (the API returns at most one page per call). */
 async function fetchActivity(
   supabase: SupabaseServer,
-  o: { from: string; to: string; group: string; propertyIds: string[] | null },
+  o: { from: string; to: string; group: string; propertyIds: string[] | null; entityIds?: string[] | null },
 ): Promise<ActivityResult[]> {
   const rows: ActivityResult[] = [];
   for (let from = 0; ; from += PAGE) {
     const { data, error } = await supabase
-      .rpc("report_activity", { p_from: o.from, p_to: o.to, p_group: o.group, p_property_ids: o.propertyIds })
+      .rpc("report_activity", { p_from: o.from, p_to: o.to, p_group: o.group, p_property_ids: o.propertyIds, p_entity_ids: o.entityIds ?? null })
       .range(from, from + PAGE - 1);
     if (error) throw new Error(error.message);
     rows.push(...((data ?? []) as ActivityResult[]));
@@ -75,13 +75,34 @@ async function fetchAccounts(supabase: SupabaseServer, entityIds: string[]): Pro
 const longDate = (d: string) =>
   new Date(d + "T00:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
 
+/**
+ * Which businesses and properties a report covers. "All businesses" combines every entity, including ones
+ * with no properties (a consulting business, say); choosing an entity limits the report to its books.
+ */
+export async function scopeFor(params: Pick<ReportParams, "property" | "entity">) {
+  const { supabase } = await getSession();
+  const [{ data: ents }, props] = await Promise.all([supabase.from("entities").select("id, name").order("name"), selectProperties(params.property)]);
+  const allEntities = (ents ?? []) as { id: string; name: string }[];
+  const entity = params.entity !== "all" ? allEntities.find((e) => e.id === params.entity) : undefined;
+
+  const selected = entity ? props.selected.filter((p) => p.entity_id === entity.id) : props.selected;
+  let entities = entity ? [entity] : allEntities;
+  if (props.filtered) {
+    const inScope = new Set(selected.map((p) => p.entity_id));
+    entities = entities.filter((e) => inScope.has(e.id));
+  }
+  const label = props.filtered ? props.label : entity ? entity.name : allEntities.length > 1 ? "All Businesses" : props.label;
+  return { entities, selected, filtered: props.filtered, entityScoped: Boolean(entity), label, allEntities };
+}
+
 /** Load the data for a report and build it: income statement, net cash flow, balance sheet or trial balance. */
 export async function loadReport(params: ReportParams): Promise<ReportData> {
   const { supabase } = await getSession();
-  const { selected, label, filtered } = await selectProperties(params.property);
+  const scope = await scopeFor(params);
+  const { selected, label, filtered } = scope;
   const asOf = AS_OF_REPORTS.includes(params.report);
 
-  const entityIds = [...new Set(selected.map((p) => p.entity_id))];
+  const entityIds = scope.entities.map((e) => e.id);
   const accounts = await fetchAccounts(supabase, entityIds);
 
   // Point-in-time reports add up everything from the beginning to the as-of date.
@@ -90,14 +111,14 @@ export async function loadReport(params: ReportParams): Promise<ReportData> {
     params.report === "trial-balance"
       ? "total"
       : params.report === "balance-sheet"
-        ? params.columns === "property"
-          ? "property"
+        ? params.columns === "property" || params.columns === "entity"
+          ? params.columns
           : "total"
         : params.columns;
 
   const rows =
     entityIds.length > 0
-      ? await fetchActivity(supabase, { from, to: params.to, group: grouping, propertyIds: filtered ? selected.map((p) => p.id) : null })
+      ? await fetchActivity(supabase, { from, to: params.to, group: grouping, propertyIds: filtered ? selected.map((p) => p.id) : null, entityIds })
       : [];
 
   const activity: ActivityRow[] = rows.map((r) => ({
@@ -112,6 +133,8 @@ export async function loadReport(params: ReportParams): Promise<ReportData> {
     if (activity.some((a) => a.columnKey === "unassigned")) {
       columns.push({ key: "unassigned", label: "Not assigned to a property" });
     }
+  } else if (grouping === "entity") {
+    columns = scope.entities.map((e) => ({ key: e.id, label: e.name }));
   } else if (grouping === "total") {
     columns = [{ key: "all", label: "Total" }];
   } else {
@@ -179,8 +202,9 @@ const dayBefore = (d: string) => {
 /** Journal lines by account for the period, with opening balances and running balances. */
 export async function loadLedger(params: ReportParams): Promise<LedgerReport> {
   const { supabase } = await getSession();
-  const { selected, label, filtered } = await selectProperties(params.property);
-  const entityIds = [...new Set(selected.map((p) => p.entity_id))];
+  const scope = await scopeFor(params);
+  const { selected, label, filtered } = scope;
+  const entityIds = scope.entities.map((e) => e.id);
   const accountsInfo = await fetchAccounts(supabase, entityIds);
   const propertyIds = filtered ? selected.map((p) => p.id) : null;
 
@@ -203,13 +227,13 @@ export async function loadLedger(params: ReportParams): Promise<LedgerReport> {
   if (entityIds.length > 0) {
     const before = dayBefore(params.from);
     const yearStart = `${params.from.slice(0, 4)}-01-01`;
-    const carried = await fetchActivity(supabase, { from: "1900-01-01", to: before, group: "total", propertyIds });
+    const carried = await fetchActivity(supabase, { from: "1900-01-01", to: before, group: "total", propertyIds, entityIds });
     for (const r of carried) {
       const t = byId.get(r.account_id)?.type;
       if (t && t !== "income" && t !== "expense") opening.set(r.account_id, Number(r.net_cents));
     }
     if (params.from > yearStart) {
-      const ytd = await fetchActivity(supabase, { from: yearStart, to: before, group: "total", propertyIds });
+      const ytd = await fetchActivity(supabase, { from: yearStart, to: before, group: "total", propertyIds, entityIds });
       for (const r of ytd) {
         const t = byId.get(r.account_id)?.type;
         if (t === "income" || t === "expense") opening.set(r.account_id, Number(r.net_cents));
@@ -277,10 +301,10 @@ const lifeFor = (name: string) => (/appliance|carpet|flooring|furnish/i.test(nam
 async function capexFromBooks(
   supabase: SupabaseServer,
   selected: { id: string; name: string; entity_id: string; portfolios: { name: string } | null }[],
+  entityIds: string[],
   filtered: boolean,
   to: string,
 ): Promise<CapexRow[]> {
-  const entityIds = [...new Set(selected.map((p) => p.entity_id))];
   const accounts = await fetchAccounts(supabase, entityIds);
   const fixed = accounts.filter((a) => a.type === "asset" && a.subtype === "fixed_asset");
   if (fixed.length === 0) return [];
@@ -348,14 +372,17 @@ export interface CapexRow {
 /** Capital expenses up to the end of the period (it is a cumulative schedule). */
 export async function loadCapex(params: ReportParams): Promise<{ title: string; subtitle: string; rows: CapexRow[] }> {
   const { supabase } = await getSession();
-  const { selected, label, filtered } = await selectProperties(params.property);
+  const scope = await scopeFor(params);
+  const { selected, label } = scope;
+  // The register has no business column, so a business is limited through its properties.
+  const restrict = scope.filtered || scope.entityScoped;
 
   let q = supabase
     .from("capital_expenses")
     .select("id, name, sub_category, amount_cents, spent_on, placed_in_service_on, useful_life_years, notes, properties(name, portfolios(name))")
     .lte("spent_on", params.to)
     .order("spent_on");
-  if (filtered) {
+  if (restrict) {
     q = q.in(
       "property_id",
       selected.map((p) => p.id),
@@ -380,7 +407,7 @@ export async function loadCapex(params: ReportParams): Promise<{ title: string; 
     };
   });
 
-  const fromBooks = await capexFromBooks(supabase, selected, filtered, params.to);
+  const fromBooks = await capexFromBooks(supabase, selected, scope.entities.map((e) => e.id), scope.filtered, params.to);
   const all = [...rows, ...fromBooks].sort((a, b) => a.spentOn.localeCompare(b.spentOn) || a.name.localeCompare(b.name));
   const through = new Date(params.to + "T00:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
   return { title: `Schedule of Capital Expense for ${label}`, subtitle: `Cumulative through ${through}`, rows: all };

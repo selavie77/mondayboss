@@ -12,6 +12,8 @@ export interface FilterOptions {
   years: number[];
   /** General ledger only: accounts that can be picked. */
   accounts?: { code: string; name: string }[];
+  /** The businesses (entities). The business filter and "By business" columns appear when there is more than one. */
+  entities?: { id: string; name: string }[];
 }
 
 const label = "mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted";
@@ -30,6 +32,8 @@ export function ReportControls({ params, options }: { params: ReportParams; opti
   const go = (patch: Partial<ReportParams>) =>
     start(() => router.replace(`/reports/${params.report}?${toQuery({ ...params, ...patch }, false)}`, { scroll: false }));
 
+  const entities = options.entities ?? [];
+  const multi = entities.length > 1;
   const year = options.years.find((y) => params.from === `${y}-01-01` && params.to === `${y}-12-31`);
   const yearEnd = options.years.find((y) => params.to === `${y}-12-31`);
   const exportHref = (format: string) => `/reports/export?${toQuery(params)}&format=${format}`;
@@ -40,6 +44,22 @@ export function ReportControls({ params, options }: { params: ReportParams; opti
       aria-busy={pending}
       className="flex flex-wrap items-end gap-x-3 gap-y-3 rounded-xl border border-border bg-surface p-4 shadow-[var(--shadow-card)] print:hidden"
     >
+      {multi && (
+        <div className="w-full sm:w-52">
+          <label className={label} htmlFor="f-entity">
+            Business
+          </label>
+          <Select compact id="f-entity" value={params.entity} onChange={(e) => go({ entity: e.target.value })}>
+            <option value="all">All businesses (combined)</option>
+            {entities.map((en) => (
+              <option key={en.id} value={en.id}>
+                {en.name}
+              </option>
+            ))}
+          </Select>
+        </div>
+      )}
+
       <div className="w-full sm:w-56">
         <label className={label} htmlFor="f-property">
           Property
@@ -146,6 +166,7 @@ export function ReportControls({ params, options }: { params: ReportParams; opti
           </label>
           <Select compact id="f-columns" className="w-36" value={params.columns} onChange={(e) => go({ columns: e.target.value as ReportParams["columns"] })}>
             <option value="property">By property</option>
+            {multi && <option value="entity">By business</option>}
             {kind !== "balance-sheet" && (
               <>
                 <option value="month">By month</option>

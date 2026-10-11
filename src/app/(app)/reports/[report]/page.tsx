@@ -29,13 +29,14 @@ export default async function ReportPage({ params: routeParams, searchParams }: 
   const { supabase } = await getSession();
 
   // Default to the most recent year that has entries, and offer every year with entries.
-  const [{ count: pendingCount }, { data: dates }, { data: oldest }, { data: portfolios }, { data: pref }, props] = await Promise.all([
+  const [{ count: pendingCount }, { data: dates }, { data: oldest }, { data: portfolios }, { data: pref }, props, { data: entityRows }] = await Promise.all([
     supabase.from("statement_lines").select("id", { count: "exact", head: true }).eq("status", "pending"),
     supabase.from("journal_entries").select("entry_date").order("entry_date", { ascending: false }).limit(1),
     supabase.from("journal_entries").select("entry_date").order("entry_date").limit(1),
     supabase.from("portfolios").select("id, name").order("name"),
     supabase.from("report_prefs").select("is_favorite").eq("report_key", key).maybeSingle(),
     selectProperties("all"),
+    supabase.from("entities").select("id, name").order("name"),
   ]);
   const latest = dates?.[0]?.entry_date ? Number(dates[0].entry_date.slice(0, 4)) : new Date().getFullYear();
   const first = oldest?.[0]?.entry_date ? Number(oldest[0].entry_date.slice(0, 4)) : latest;
@@ -74,6 +75,7 @@ export default async function ReportPage({ params: routeParams, searchParams }: 
             portfolios: portfolios ?? [],
             years,
             accounts: ledger?.accountOptions,
+            entities: (entityRows ?? []) as { id: string; name: string }[],
           }}
         />
       </div>

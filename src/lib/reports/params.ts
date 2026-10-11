@@ -11,6 +11,8 @@ export interface ReportParams {
   cents: boolean;
   /** General ledger only: "all" or an account code. */
   account: string;
+  /** "all" (every business, combined) or one entity's id. */
+  entity: string;
 }
 
 export const REPORTS: { kind: ReportKind; label: string; description: string }[] = [
@@ -67,7 +69,7 @@ export function parseParams(
   if (from > to) [from, to] = [to, from];
 
   const columnsRaw = one(sp.columns);
-  const columns = (["property", "month", "quarter", "year", "total"] as const).find((c) => c === columnsRaw) ?? "property";
+  const columns = (["property", "entity", "month", "quarter", "year", "total"] as const).find((c) => c === columnsRaw) ?? "property";
 
   return {
     report,
@@ -78,6 +80,7 @@ export function parseParams(
     detail: one(sp.detail) === "category" ? "category" : "sub",
     cents: one(sp.cents) === "1",
     account: one(sp.account) || "all",
+    entity: one(sp.entity) || "all",
   };
 }
 
@@ -92,6 +95,7 @@ export function toQuery(p: ReportParams, includeReport = true): string {
   if (includeReport) q.set("report", p.report);
   if (p.cents) q.set("cents", "1");
   if (p.account !== "all") q.set("account", p.account);
+  if (p.entity !== "all") q.set("entity", p.entity);
   return q.toString();
 }
 

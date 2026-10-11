@@ -1,6 +1,7 @@
 import { Logo } from "@/components/ui";
 import { getSession } from "@/lib/workspace";
 import { signOut } from "../(auth)/actions";
+import { AddTransaction } from "./AddTransaction";
 import { Nav } from "./Nav";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
@@ -15,6 +16,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <aside className="border-b border-border bg-surface print:hidden lg:sticky lg:top-0 lg:flex lg:h-screen lg:flex-col lg:border-b-0 lg:border-r">
         <div className="flex items-center justify-between px-5 py-4 lg:py-6">
           <Logo />
+        </div>
+        <div className="px-3 pb-3 print:hidden">
+          <AddTransaction />
         </div>
         <Nav reviewCount={reviewCount ?? 0} />
         <div className="hidden border-t border-border p-4 lg:mt-auto lg:block">

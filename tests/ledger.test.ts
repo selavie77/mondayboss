@@ -365,3 +365,70 @@ describe("batch posting of statement lines", () => {
     expect((status.rows[0] as { status: string }).status).toBe("pending");
   });
 });
+
+describe("reporting across businesses", () => {
+  const newBusiness = async (name: string) => {
+    const ent = (await db.query<{ id: string }>(`insert into entities (workspace_id, name) values ($1, $2) returning id`, [s.ws, name])).rows[0].id;
+    await db.query(`select seed_default_chart($1)`, [ent]);
+    const acct = async (code: string) => (await db.query<{ id: string }>(`select id from accounts where entity_id = $1 and code = $2`, [ent, code])).rows[0].id;
+    const post = async (date: string, memo: string, debit: string, credit: string, cents: number) =>
+      db.query(`select post_entry($1, $2::date, $3, $4::jsonb)`, [ent, date, memo, JSON.stringify([
+        { account_id: await acct(debit), debit_cents: cents },
+        { account_id: await acct(credit), credit_cents: cents },
+      ])]);
+    return { ent, acct, post };
+  };
+
+  it("groups by business, with each business's own activity", async () => {
+    const rental = await newBusiness("Rental Biz");
+    const consulting = await newBusiness("Consulting Biz");
+    await rental.post("2031-02-01", "rent", "1000", "4000", 100000);
+    await consulting.post("2031-02-02", "invoice paid", "1000", "4000", 250000);
+    await consulting.post("2031-02-03", "software", "5140", "1000", 4000);
+
+    const rows = (await db.query(
+      `select bucket, sum(net_cents)::int n from report_activity('2031-01-01', '2031-12-31', 'entity') group by bucket order by bucket`)).rows as { bucket: string; n: number }[];
+    const byEntity = new Map(rows.map((r) => [r.bucket, r.n]));
+    // Every journal entry balances, so each business nets to zero on its own.
+    expect(byEntity.get(rental.ent)).toBe(0);
+    expect(byEntity.get(consulting.ent)).toBe(0);
+
+    const income = async (ent: string) =>
+      Number((await db.query<{ n: string }>(
+        `select coalesce(sum(r.net_cents), 0) n from report_activity('2031-01-01', '2031-12-31', 'entity', null, array[$1]::uuid[]) r
+           join accounts a on a.id = r.account_id where a.type = 'income'`, [ent])).rows[0].n);
+    expect(await income(rental.ent)).toBe(-100000); // credit-natural, so negative net
+    expect(await income(consulting.ent)).toBe(-250000);
+  });
+
+  it("limits a report to one business when asked", async () => {
+    const a = await newBusiness("Only A");
+    const b = await newBusiness("Only B");
+    await a.post("2032-03-01", "a", "1000", "4000", 111);
+    await b.post("2032-03-01", "b", "1000", "4000", 222);
+    const rows = (await db.query(`select distinct bucket from report_activity('2032-01-01', '2032-12-31', 'entity', null, array[$1]::uuid[])`, [a.ent])).rows as { bucket: string }[];
+    expect(rows.map((r) => r.bucket)).toEqual([a.ent]);
+  });
+});
+
+describe("most common accounts", () => {
+  it("ranks the accounts a business uses most, ignoring opening balances and reversals", async () => {
+    const ent = (await db.query<{ id: string }>(`insert into entities (workspace_id, name) values ($1, 'Common LLC') returning id`, [s.ws])).rows[0].id;
+    await db.query(`select seed_default_chart($1)`, [ent]);
+    const acct = async (code: string) => (await db.query<{ id: string }>(`select id from accounts where entity_id = $1 and code = $2`, [ent, code])).rows[0].id;
+    const post = async (expense: string) =>
+      db.query(`select post_entry($1, '2033-04-01'::date, 'x', $2::jsonb)`, [ent, JSON.stringify([
+        { account_id: await acct(expense), debit_cents: 100 },
+        { account_id: await acct("1000"), credit_cents: 100 },
+      ])]);
+    await post("5120"); await post("5120"); await post("5120"); // utilities x3
+    await post("5090"); await post("5090");                      // repairs x2
+    await post("5100");                                          // supplies x1
+    const first = (await db.query<{ id: string }>(`select post_entry($1, '2033-04-02'::date, 'x', $2::jsonb) as id`, [ent, JSON.stringify([
+      { account_id: await acct("5100"), debit_cents: 5 }, { account_id: await acct("1000"), credit_cents: 5 }])])).rows[0].id;
+    await db.query(`select reverse_entry($1, '2033-04-03')`, [first]); // reversal lines must not count
+
+    const rows = (await db.query(`select a.code, c.uses::int from common_accounts($1, 'expense', 6) c join accounts a on a.id = c.account_id`, [ent])).rows as { code: string; uses: number }[];
+    expect(rows.map((r) => [r.code, r.uses])).toEqual([["5120", 3], ["5090", 2], ["5100", 2]]);
+  });
+});

@@ -15,11 +15,13 @@ export function Modal({
   onClose,
   title,
   children,
+  size = "md",
 }: {
   open: boolean;
   onClose: () => void;
   title: string;
   children: React.ReactNode;
+  size?: "md" | "lg";
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   // false while rendering on the server, true in the browser.
@@ -43,7 +45,7 @@ export function Modal({
         // A click on the backdrop (the dialog element itself) closes it.
         if (e.target === ref.current) onClose();
       }}
-      className="m-auto w-[min(34rem,92vw)] rounded-2xl border border-border bg-surface p-0 text-foreground shadow-2xl backdrop:bg-black/40"
+      className={`m-auto ${size === "lg" ? "w-[min(44rem,94vw)]" : "w-[min(34rem,92vw)]"} max-h-[92vh] rounded-2xl border border-border bg-surface p-0 text-foreground shadow-2xl backdrop:bg-black/40`}
     >
       {open && (
         <div className="p-6">

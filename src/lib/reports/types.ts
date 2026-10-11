@@ -71,4 +71,4 @@ export type ReportKind =
   | "balance-sheet"
   | "trial-balance"
   | "general-ledger";
-export type ColumnGrouping = "property" | "month" | "quarter" | "year" | "total";
+export type ColumnGrouping = "property" | "entity" | "month" | "quarter" | "year" | "total";
