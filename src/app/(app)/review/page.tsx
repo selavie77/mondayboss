@@ -12,7 +12,7 @@ export default async function ReviewPage() {
   const { data: lines } = await supabase
     .from("statement_lines")
     .select(
-      "id, entity_id, account_id, txn_date, description, amount_cents, raw, review_reason, proposed_debit_account_id, proposed_credit_account_id, properties(name)",
+      "id, entity_id, account_id, property_id, txn_date, description, amount_cents, raw, review_reason, proposed_debit_account_id, proposed_credit_account_id, properties(name)",
     )
     .eq("status", "pending")
     .order("txn_date", { ascending: false })
@@ -39,6 +39,8 @@ export default async function ReviewPage() {
     type: a.type,
     isBank: a.is_bank,
   }));
+  const { data: propRows } = await supabase.from("properties").select("id, name, entity_id").order("name");
+  const propertyOptions = (propRows ?? []).map((p) => ({ id: p.id as string, name: p.name as string, entityId: p.entity_id as string }));
   const byId = new Map(accountOptions.map((a) => [a.id, a]));
   const label = (id: string | null) => {
     const a = id ? byId.get(id) : undefined;
@@ -55,6 +57,7 @@ export default async function ReviewPage() {
       id: l.id,
       entityId: l.entity_id,
       paidFromId: (l.account_id as string | null) ?? null,
+      propertyId: (l.property_id as string | null) ?? null,
       date: l.txn_date,
       description: l.description,
       amountCents: amount,
@@ -88,7 +91,7 @@ export default async function ReviewPage() {
           <p className="max-w-sm text-sm text-muted">New imports that look unusual will wait for you here.</p>
         </Card>
       ) : (
-        <ReviewList items={items} accounts={accountOptions} />
+        <ReviewList items={items} accounts={accountOptions} properties={propertyOptions} />
       )}
     </div>
   );

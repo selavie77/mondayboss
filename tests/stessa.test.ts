@@ -51,16 +51,54 @@ describe("Stessa -> double-entry mapping", () => {
     expect(entries[0].lines[0]).toMatchObject({ accountCode: "5090::Plumbing Repairs" });
   });
 
-  it("refuses to guess an unsplit mortgage payment", () => {
-    const { entries, unresolved } = plan(row({ category: "Mortgages & Loans", subCategory: null, amountCents: -55760 }));
-    expect(entries).toHaveLength(0);
-    expect(unresolved[0].reason).toMatch(/split/);
+  it("posts an unsplit mortgage payment to Mortgage Payable as debt service, in its own subcategory", () => {
+    const { entries, review, unresolved } = plan(row({ category: "Mortgages & Loans", subCategory: null, amountCents: -55760 }));
+    expect(unresolved).toHaveLength(0);
+    expect(review).toHaveLength(0);
+    expect(entries[0].lines[0]).toMatchObject({ accountCode: "2100::Payments not yet split", debitCents: 55760 });
+    expect(entries[0].lines[1]).toMatchObject({ accountCode: "1000", creditCents: 55760 });
+    expect(entries[0].notes.join()).toMatch(/no principal\/interest split/);
   });
 
-  it("flags negative income for review", () => {
+  it("posts a transfer with no sub-category to the Transfers category", () => {
+    const { entries, unresolved } = plan(row({ category: "Transfers", subCategory: null, amountCents: 120000 }));
+    expect(unresolved).toHaveLength(0);
+    expect(entries[0].lines[0]).toMatchObject({ accountCode: "1000", debitCents: 120000 });
+    expect(entries[0].lines[1]).toMatchObject({ accountCode: "3200", creditCents: 120000 });
+  });
+
+  it("records a positive expense as a refund: money in, expense reduced, no review", () => {
+    const { entries, review } = plan(row({ category: "Utilities", subCategory: "Water & Sewer", amountCents: 2622 }));
+    expect(review).toHaveLength(0);
+    expect(entries[0].lines[0]).toMatchObject({ accountCode: "1000", debitCents: 2622 });
+    expect(entries[0].lines[1]).toMatchObject({ accountCode: "5120::Water & Sewer", creditCents: 2622 });
+    expect(entries[0].notes).toContain("Positive expenses recorded as refunds");
+  });
+
+  it("treats every expense category the same way", () => {
+    for (const category of ["Insurance", "Legal & Professional", "Taxes", "Admin & Other", "Management Fees", "Repairs & Maintenance"]) {
+      const { entries, review } = plan(row({ category, subCategory: null, amountCents: 5000 }));
+      expect(review).toHaveLength(0);
+      expect(entries[0].notes).toContain("Positive expenses recorded as refunds");
+    }
+  });
+
+  it("records negative income as a refund: income reduced, money out, no review", () => {
     const { entries, review } = plan(row({ amountCents: -36500 }));
-    expect(entries).toHaveLength(0);
-    expect(review[0].warnings.join()).toMatch(/Negative income/);
+    expect(review).toHaveLength(0);
+    expect(entries[0].lines[0]).toMatchObject({ accountCode: "4000", debitCents: 36500 });
+    expect(entries[0].lines[1]).toMatchObject({ accountCode: "1000", creditCents: 36500 });
+    expect(entries[0].notes).toContain("Negative income recorded as refunds");
+  });
+
+  it("still holds a property tax paid from escrow for review, because it changes your deduction", () => {
+    const { review } = plan(row({ category: "Transfers", subCategory: "General Escrow Payments", name: "Tax Disbursement", notes: "Tax Disbursement", amountCents: 137888 }));
+    expect(review).toHaveLength(1);
+  });
+
+  it("only leaves a row unresolved when its category is unknown", () => {
+    const { unresolved } = plan(row({ category: "Something Else", subCategory: null }));
+    expect(unresolved[0].reason).toMatch(/Unknown category/);
   });
 
   it("produces balanced entries", () => {

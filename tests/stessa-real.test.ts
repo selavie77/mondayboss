@@ -40,7 +40,10 @@ describe.skipIf(!available)("real Stessa 2021 ledgers", () => {
     const posting = [...plan.entries, ...plan.review]; // review rows are posted here only to total the P&L
     for (const key of new Set(posting.flatMap((e) => e.lines.map((l) => l.accountCode)))) {
       const [code, sub] = key.split("::");
-      if (!sub) {
+      if (!sub && code === "3200") {
+        const made = await db.query<{ id: string }>(`select ensure_transfers_account($1) as id`, [s.ent]);
+        accountIds.set(key, made.rows[0].id);
+      } else if (!sub) {
         accountIds.set(key, await s.acct(code));
       } else {
         const made = await db.query<{ id: string }>(`select ensure_subaccount($1, $2) as id`, [await s.acct(code), sub]);

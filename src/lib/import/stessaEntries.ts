@@ -1,5 +1,5 @@
 import type { StessaLedger, StessaRow } from "./stessa";
-import { CODES, acctKey, isUnresolved, mapStessaRow, signWarning } from "./stessaMapping";
+import { CODES, acctKey, isUnresolved, mapStessaRow, refundNote } from "./stessaMapping";
 
 export interface DraftLine {
   /** Account key: a code, or "code::Subcategory" (see acctKey). */
@@ -17,7 +17,10 @@ export interface DraftEntry {
   debitCode: string;
   creditCode: string;
   lines: DraftLine[];
+  /** Reasons to hold the row for a person to look at. */
   warnings: string[];
+  /** Assumptions made while mapping the row. It is still posted. */
+  notes: string[];
 }
 
 export interface UnresolvedRow {
@@ -56,7 +59,8 @@ export function planStessaImport(ledgers: StessaLedger[]): ImportPlan {
       if (abs === 0) continue;
 
       const property = row.property;
-      const warnings = [m.review, signWarning(row)].filter((w): w is string => Boolean(w));
+      const warnings = m.review ? [m.review] : [];
+      const notes = [m.note, refundNote(row)].filter((n): n is string => Boolean(n));
 
       let debitCode: string;
       let creditCode: string;
@@ -84,6 +88,7 @@ export function planStessaImport(ledgers: StessaLedger[]): ImportPlan {
           { accountCode: creditCode, property, debitCents: 0, creditCents: abs },
         ],
         warnings,
+        notes,
       };
       (warnings.length > 0 ? review : entries).push(entry);
     }

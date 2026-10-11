@@ -22,6 +22,7 @@ export interface ReviewItem {
   id: string;
   entityId: string;
   paidFromId: string | null;
+  propertyId: string | null;
   date: string;
   description: string;
   amountCents: number;
@@ -52,16 +53,30 @@ const typeLabel: Record<string, string> = {
   asset: "Assets",
 };
 
+export interface PropertyOption {
+  id: string;
+  name: string;
+  entityId: string;
+}
+
+interface TransferOption {
+  id: string;
+  label: string;
+}
+
 function AccountSelect({
   accounts,
   value,
   onChange,
   label,
+  transfers = [],
 }: {
   accounts: AccountOption[];
   value: string;
   onChange: (v: string) => void;
   label: string;
+  /** Other bank accounts and cards, for moving money between your own accounts (a card payment, for example). */
+  transfers?: TransferOption[];
 }) {
   return (
     <Select aria-label={label} value={value} onChange={(e) => onChange(e.target.value)} compact>
@@ -83,11 +98,20 @@ function AccountSelect({
           </optgroup>
         );
       })}
+      {transfers.length > 0 && (
+        <optgroup label="Transfer to or from another account">
+          {transfers.map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.label}
+            </option>
+          ))}
+        </optgroup>
+      )}
     </Select>
   );
 }
 
-export function ReviewList({ items, accounts }: { items: ReviewItem[]; accounts: AccountOption[] }) {
+export function ReviewList({ items, accounts, properties }: { items: ReviewItem[]; accounts: AccountOption[]; properties: PropertyOption[] }) {
   const groups = useMemo(() => {
     const m = new Map<string, ReviewItem[]>();
     for (const it of items) {
@@ -100,13 +124,25 @@ export function ReviewList({ items, accounts }: { items: ReviewItem[]; accounts:
   return (
     <div className="space-y-6">
       {groups.map(([reason, rows], i) => (
-        <Group key={reason} reason={reason} rows={rows} accounts={accounts} delay={i * 50} />
+        <Group key={reason} reason={reason} rows={rows} accounts={accounts} properties={properties} delay={i * 50} />
       ))}
     </div>
   );
 }
 
-function Group({ reason, rows, accounts, delay }: { reason: string; rows: ReviewItem[]; accounts: AccountOption[]; delay: number }) {
+function Group({
+  reason,
+  rows,
+  accounts,
+  properties,
+  delay,
+}: {
+  reason: string;
+  rows: ReviewItem[];
+  accounts: AccountOption[];
+  properties: PropertyOption[];
+  delay: number;
+}) {
   const [pending, start] = useTransition();
   const [error, setError] = useState<string>();
   const acceptable = rows.filter((r) => r.hasProposal);
@@ -144,7 +180,7 @@ function Group({ reason, rows, accounts, delay }: { reason: string; rows: Review
         )}
         <ul className="divide-y divide-border">
           {rows.map((r) => (
-            <Row key={r.id} item={r} accounts={accounts.filter((a) => a.entityId === r.entityId)} />
+            <Row key={r.id} item={r} accounts={accounts.filter((a) => a.entityId === r.entityId)} properties={properties.filter((p) => p.entityId === r.entityId)} />
           ))}
         </ul>
       </Card>
@@ -154,13 +190,17 @@ function Group({ reason, rows, accounts, delay }: { reason: string; rows: Review
 
 type Mode = "view" | "change" | "split";
 
-function Row({ item, accounts }: { item: ReviewItem; accounts: AccountOption[] }) {
+function Row({ item, accounts, properties }: { item: ReviewItem; accounts: AccountOption[]; properties: PropertyOption[] }) {
   const [mode, setMode] = useState<Mode>("view");
   const [pending, start] = useTransition();
   const [error, setError] = useState<string>();
   // Where the money came from: defaults to the property's account, and can be changed.
   const cash = accounts.filter((a) => a.isBank || a.subtype === "credit_card");
   const [paidFrom, setPaidFrom] = useState(item.paidFromId ?? cash[0]?.id ?? "");
+  const [propertyId, setPropertyId] = useState(item.propertyId ?? "");
+  const transfers: TransferOption[] = cash
+    .filter((a) => a.id !== paidFrom)
+    .map((a) => ({ id: a.id, label: `${a.name}${a.last4 ? ` ••${a.last4}` : ""}${a.isBank ? "" : " (credit card)"}` }));
 
   const run = (fn: () => Promise<ReviewResult>) =>
     start(async () => {
@@ -225,7 +265,7 @@ function Row({ item, accounts }: { item: ReviewItem; accounts: AccountOption[] }
           <label htmlFor={`paid-${item.id}`} className="text-muted">
             {inflow ? "Deposited into" : "Paid from"}
           </label>
-          <div className="w-full sm:w-72">
+          <div className="w-full sm:w-64">
             <Select compact id={`paid-${item.id}`} value={paidFrom} onChange={(e) => setPaidFrom(e.target.value)}>
               {cash.map((a) => (
                 <option key={a.id} value={a.id}>
@@ -236,6 +276,23 @@ function Row({ item, accounts }: { item: ReviewItem; accounts: AccountOption[] }
               ))}
             </Select>
           </div>
+          {properties.length > 0 && (
+            <>
+              <label htmlFor={`prop-${item.id}`} className="text-muted sm:ml-3">
+                Property
+              </label>
+              <div className="w-full sm:w-64">
+                <Select compact id={`prop-${item.id}`} value={propertyId} onChange={(e) => setPropertyId(e.target.value)}>
+                  <option value="">No property</option>
+                  {properties.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            </>
+          )}
         </div>
       )}
 
@@ -244,7 +301,8 @@ function Row({ item, accounts }: { item: ReviewItem; accounts: AccountOption[] }
           accounts={accounts}
           pending={pending}
           onCancel={() => setMode("view")}
-          onPost={(accountId) => run(() => postLine(item.id, [{ accountId, cents: abs }], paidFrom || undefined))}
+          transfers={transfers}
+          onPost={(accountId) => run(() => postLine(item.id, [{ accountId, cents: abs }], paidFrom || undefined, propertyId || undefined))}
         />
       )}
 
@@ -255,7 +313,8 @@ function Row({ item, accounts }: { item: ReviewItem; accounts: AccountOption[] }
           pending={pending}
           mortgage={item.isMortgage}
           onCancel={() => setMode("view")}
-          onPost={(parts) => run(() => postLine(item.id, parts, paidFrom || undefined))}
+          transfers={transfers}
+          onPost={(parts) => run(() => postLine(item.id, parts, paidFrom || undefined, propertyId || undefined))}
         />
       )}
 
@@ -270,11 +329,13 @@ function Row({ item, accounts }: { item: ReviewItem; accounts: AccountOption[] }
 
 function Change({
   accounts,
+  transfers,
   pending,
   onCancel,
   onPost,
 }: {
   accounts: AccountOption[];
+  transfers: TransferOption[];
   pending: boolean;
   onCancel: () => void;
   onPost: (accountId: string) => void;
@@ -283,7 +344,7 @@ function Change({
   return (
     <div className="mt-3 flex flex-wrap items-center gap-2">
       <div className="w-full sm:w-80">
-        <AccountSelect accounts={accounts} value={accountId} onChange={setAccountId} label="Category" />
+        <AccountSelect accounts={accounts} transfers={transfers} value={accountId} onChange={setAccountId} label="Category" />
       </div>
       <Button size="sm" disabled={!accountId || pending} onClick={() => onPost(accountId)}>
         {pending ? "Posting…" : "Post to books"}
@@ -303,6 +364,7 @@ interface Part {
 
 function Split({
   accounts,
+  transfers,
   totalCents,
   pending,
   mortgage,
@@ -310,6 +372,7 @@ function Split({
   onPost,
 }: {
   accounts: AccountOption[];
+  transfers: TransferOption[];
   totalCents: number;
   pending: boolean;
   mortgage: boolean;
@@ -354,7 +417,7 @@ function Split({
             <li key={p.key} className="grid items-center gap-2 sm:grid-cols-[1fr_9rem_2rem]">
               <div>
                 {nameFor(code) && <span className="mb-1 block text-xs font-medium text-muted">{nameFor(code)}</span>}
-                <AccountSelect accounts={accounts} value={p.accountId} onChange={(v) => update(p.key, { accountId: v })} label="Account" />
+                <AccountSelect accounts={accounts} transfers={transfers} value={p.accountId} onChange={(v) => update(p.key, { accountId: v })} label="Account" />
               </div>
               <Input
                 aria-label="Amount"

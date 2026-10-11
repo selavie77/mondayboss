@@ -34,6 +34,7 @@ export async function postLine(
   id: string,
   parts: { accountId: string; cents: number }[],
   paidFromAccountId?: string,
+  propertyId?: string,
 ): Promise<ReviewResult> {
   const idOk = uuid.safeParse(id);
   const partsOk = partsSchema.safeParse(parts);
@@ -74,13 +75,26 @@ export async function postLine(
   }
   if (!paidFrom) return { error: "Choose the account this was paid from." };
 
+  if (partsOk.data.some((p) => p.accountId === paidFrom)) {
+    return { error: "The other side of a transfer must be a different account from the one it was paid from." };
+  }
+
+  // Property: the one chosen on the row, else the one the line already has (statement rows may have none).
+  let property: string | null = line.property_id as string | null;
+  if (propertyId) {
+    if (!uuid.safeParse(propertyId).success) return { error: "Unknown property." };
+    const { data: prop } = await supabase.from("properties").select("id").eq("id", propertyId).maybeSingle();
+    if (!prop) return { error: "That property was not found." };
+    property = prop.id;
+  }
+
   // Money out: Dr the chosen accounts, Cr cash. Money in: Dr cash, Cr the chosen accounts.
   const inflow = Number(line.amount_cents) > 0;
   const side = inflow ? "credit_cents" : "debit_cents";
   const otherSide = inflow ? "debit_cents" : "credit_cents";
   const lines = [
-    ...partsOk.data.map((p) => ({ account_id: p.accountId, property_id: line.property_id, [side]: p.cents })),
-    { account_id: paidFrom, property_id: line.property_id, [otherSide]: abs },
+    ...partsOk.data.map((p) => ({ account_id: p.accountId, property_id: property, [side]: p.cents })),
+    { account_id: paidFrom, property_id: property, [otherSide]: abs },
   ];
 
   const { error } = await supabase.rpc("post_statement_line", { p_line_id: id, p_lines: lines });

@@ -1,7 +1,10 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  // Imports upload spreadsheets and statements through Server Actions; the default limit is 1MB.
+  experimental: {
+    serverActions: { bodySizeLimit: "10mb" },
+  },
   turbopack: {
     rules: {
       "*.css": {

@@ -314,3 +314,54 @@ describe("account opening balances and bank / credit card accounts", () => {
     expect(await net(loan)).toBe(-7850000);
   });
 });
+
+describe("general Transfers account", () => {
+  it("is created once, on demand, as an equity account", async () => {
+    const ent = (await db.query<{ id: string }>(`insert into entities (workspace_id, name) values ($1, 'Transfers LLC') returning id`, [s.ws])).rows[0].id;
+    await db.query(`select seed_default_chart($1)`, [ent]);
+    const first = (await db.query<{ id: string }>(`select ensure_transfers_account($1) as id`, [ent])).rows[0].id;
+    const again = (await db.query<{ id: string }>(`select ensure_transfers_account($1) as id`, [ent])).rows[0].id;
+    expect(again).toBe(first);
+    expect((await db.query(`select code, name, type, subtype from accounts where id = $1`, [first])).rows[0]).toMatchObject({
+      code: "3200", name: "Transfers", type: "equity", subtype: "transfers",
+    });
+  });
+});
+
+describe("batch posting of statement lines", () => {
+  const stage = async (cents: number) => {
+    const batch = (await db.query<{ id: string }>(`insert into import_batches (workspace_id, entity_id, source) values ($1,$2,'test') returning id`, [s.ws, s.ent])).rows[0].id;
+    return (await db.query<{ id: string }>(
+      `insert into statement_lines (workspace_id, entity_id, batch_id, txn_date, description, amount_cents, dedupe_hash)
+       values ($1,$2,$3,'2021-09-15','batch line',$4,$5) returning id`, [s.ws, s.ent, batch, cents, Math.random().toString(36)])).rows[0].id;
+  };
+
+  it("posts every line in one call", async () => {
+    const a = await stage(-1000);
+    const b = await stage(-2000);
+    const lines = async (n: number) => [
+      { account_id: await s.acct("5090"), debit_cents: n },
+      { account_id: await s.acct("1000"), credit_cents: n },
+    ];
+    const items = [
+      { line_id: a, lines: await lines(1000) },
+      { line_id: b, lines: await lines(2000) },
+    ];
+    const r = await db.query(`select post_statement_lines_batch($1::jsonb) as n`, [JSON.stringify(items)]);
+    expect((r.rows[0] as { n: number }).n).toBe(2);
+    const posted = await db.query(`select count(*)::int n from statement_lines where id = any($1::uuid[]) and status = 'posted'`, [[a, b]]);
+    expect((posted.rows[0] as { n: number }).n).toBe(2);
+  });
+
+  it("posts nothing if any line in the call is rejected", async () => {
+    const good = await stage(-500);
+    const bad = await stage(-700);
+    const ok = [{ account_id: await s.acct("5090"), debit_cents: 500 }, { account_id: await s.acct("1000"), credit_cents: 500 }];
+    const wrongTotal = [{ account_id: await s.acct("5090"), debit_cents: 1 }, { account_id: await s.acct("1000"), credit_cents: 1 }];
+    await expect(
+      db.query(`select post_statement_lines_batch($1::jsonb)`, [JSON.stringify([{ line_id: good, lines: ok }, { line_id: bad, lines: wrongTotal }])]),
+    ).rejects.toThrow(/Lines total/);
+    const status = await db.query(`select status from statement_lines where id = $1`, [good]);
+    expect((status.rows[0] as { status: string }).status).toBe("pending");
+  });
+});

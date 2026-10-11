@@ -7,6 +7,7 @@ export const CODES = {
   deposits: "2000",
   mortgage: "2100",
   contributions: "3000",
+  transfers: "3200",
   distributions: "3100",
   rent: "4000",
   section8: "4010",
@@ -41,6 +42,8 @@ export const SUB_DESCRIPTIONS: Record<string, string> = {
   Electric: "Electric service for the property.",
   "Bank Fees": "Monthly account, wire and similar bank fees.",
   "Property Management": "Monthly fees charged by your property manager.",
+  "Payments not yet split":
+    "Mortgage payments that were recorded without a principal, interest and escrow split. Split them when you have the lender's statement.",
 };
 
 export interface Mapped {
@@ -50,8 +53,10 @@ export interface Mapped {
   sub?: string;
   /** Fixed debit/credit accounts that ignore the sign of the amount (non-cash movements). */
   fixed?: { debitCode: string; creditCode: string };
-  /** Mapped, but a human should look at it. */
+  /** Mapped, but a human should look at it before it is posted. */
   review?: string;
+  /** An assumption we made. The row is still posted, and the import preview mentions it. */
+  note?: string;
 }
 
 export interface Unresolved {
@@ -79,7 +84,13 @@ export function mapStessaRow(row: StessaRow): Mapped | Unresolved {
     case "Mortgages & Loans":
       if (sub === "Mortgage Interest") return { counterCode: CODES.mortgageInterest };
       if (sub === "Mortgage Principal") return { counterCode: CODES.mortgage };
-      return { reason: "Combined mortgage payment; needs a principal/interest/escrow split" };
+      // No split was available when this was recorded. Count it as debt service (principal) so cash flow
+      // still adds up, in its own subcategory so it is easy to find and split later.
+      return {
+        counterCode: CODES.mortgage,
+        sub: "Payments not yet split",
+        note: "Combined mortgage payments posted to Mortgage Payable (no principal/interest split)",
+      };
 
     case "Transfers":
       if (sub === "Owner Distributions") return { counterCode: CODES.distributions };
@@ -96,7 +107,7 @@ export function mapStessaRow(row: StessaRow): Mapped | Unresolved {
         }
         return { counterCode: CODES.escrow, review: "Escrow refund or other disbursement" };
       }
-      return { reason: "Transfer with no sub-category" };
+      return { counterCode: CODES.transfers, note: "Transfers with no sub-category posted to Transfers" };
 
     case "Repairs & Maintenance":
       if (sub && REPAIRS_TO_CLEANING.has(sub)) return { counterCode: CODES.cleaning };
@@ -125,12 +136,20 @@ export function isUnresolved(m: Mapped | Unresolved): m is Unresolved {
   return "reason" in m;
 }
 
-/** Sign sanity checks that hint at mis-categorised rows. */
-export function signWarning(row: StessaRow): string | undefined {
+const EXPENSE_CATEGORIES = new Set([
+  "Management Fees",
+  "Repairs & Maintenance",
+  "Utilities",
+  "Insurance",
+  "Legal & Professional",
+  "Taxes",
+  "Admin & Other",
+]);
+
+/** An expense with money coming in, or income with money going out, is a refund. */
+export function refundNote(row: StessaRow): string | undefined {
   const { category: cat, amountCents } = row;
-  if (cat === "Income" && amountCents < 0) return "Negative income (refund or reversal?)";
-  if (cat && ["Utilities", "Insurance", "Repairs & Maintenance", "Management Fees"].includes(cat) && amountCents > 0) {
-    return "Positive expense (refund?)";
-  }
+  if (cat === "Income" && amountCents < 0) return "Negative income recorded as refunds";
+  if (cat && EXPENSE_CATEGORIES.has(cat) && amountCents > 0) return "Positive expenses recorded as refunds";
   return undefined;
 }

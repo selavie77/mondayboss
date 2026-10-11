@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ImportPlan, DraftEntry, UnresolvedRow } from "./stessaEntries";
-import { SUB_DESCRIPTIONS, SUB_SEP } from "./stessaMapping";
+import { CODES, SUB_DESCRIPTIONS, SUB_SEP } from "./stessaMapping";
 
 export interface CommitOptions {
   workspaceId: string;
@@ -58,6 +58,14 @@ export async function commitImportPlan(supabase: SupabaseClient, o: CommitOption
     o.accountIds.set(key, made.data as string);
   }
 
+  // The general Transfers account is created the first time a plan needs it.
+  const needsTransfers = [...plan.entries, ...plan.review].some((d) => d.debitCode === CODES.transfers || d.creditCode === CODES.transfers);
+  if (needsTransfers && !o.accountIds.has(CODES.transfers)) {
+    const made = await supabase.rpc("ensure_transfers_account", { p_entity_id: o.entityId });
+    if (made.error) throw made.error;
+    o.accountIds.set(CODES.transfers, made.data as string);
+  }
+
   // The cash side of a transaction goes to the property's own bank account or card when it has one,
   // otherwise to the general account.
   const cashCode = o.bankCode ?? "1000";
@@ -106,18 +114,36 @@ export async function commitImportPlan(supabase: SupabaseClient, o: CommitOption
     const idByHash = new Map((ins.data ?? []).map((r) => [r.dedupe_hash as string, r.id as string]));
     imported += idByHash.size;
 
+    // Post the clean rows of this chunk in one database call. If the call is rejected, none of the chunk
+    // was posted, so retry one by one to say exactly which row is the problem.
+    const items: { line_id: string; lines: object[]; label: string }[] = [];
     for (const s of slice) {
       if (!s.entry) continue;
       const id = idByHash.get(s.entry.dedupeHash);
       if (!id) continue; // already imported earlier
-      const lines = s.entry.lines.map((l) => ({
-        account_id: resolve(l.accountCode, l.property),
-        property_id: o.propertyIds.get(l.property) ?? null,
-        debit_cents: l.debitCents,
-        credit_cents: l.creditCents,
-      }));
-      const r = await supabase.rpc("post_statement_line", { p_line_id: id, p_lines: lines });
-      if (r.error) throw new Error(`${s.entry.date} ${s.entry.memo}: ${r.error.message}`);
+      items.push({
+        line_id: id,
+        label: `${s.entry.date} ${s.entry.memo}`,
+        lines: s.entry.lines.map((l) => ({
+          account_id: resolve(l.accountCode, l.property),
+          property_id: o.propertyIds.get(l.property) ?? null,
+          debit_cents: l.debitCents,
+          credit_cents: l.creditCents,
+        })),
+      });
+    }
+    if (items.length === 0) continue;
+
+    const batchResult = await supabase.rpc("post_statement_lines_batch", {
+      p_items: items.map(({ line_id, lines }) => ({ line_id, lines })),
+    });
+    if (!batchResult.error) {
+      posted += items.length;
+      continue;
+    }
+    for (const item of items) {
+      const r = await supabase.rpc("post_statement_line", { p_line_id: item.line_id, p_lines: item.lines });
+      if (r.error) throw new Error(`${item.label}: ${r.error.message}`);
       posted += 1;
     }
   }

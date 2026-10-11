@@ -17,7 +17,10 @@ export interface StessaRow {
 }
 
 export interface StessaLedger {
+  /** From the title: a property name, or "All Properties" for a whole-portfolio export. */
   propertyName: string;
+  /** The distinct properties the rows belong to. */
+  properties: string[];
   rows: StessaRow[];
   skippedRows: number; // blank / footer rows
 }
@@ -36,6 +39,21 @@ export async function parseStessaLedger(path: string): Promise<StessaLedger> {
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.readFile(path);
   return readStessaSheet(wb.worksheets[0]);
+}
+
+/** Parse an uploaded Stessa "General Ledger" xlsx. Throws a readable error for anything else. */
+export async function parseStessaBuffer(buffer: Buffer): Promise<StessaLedger> {
+  const wb = new ExcelJS.Workbook();
+  try {
+    await wb.xlsx.load(buffer as unknown as ExcelJS.Buffer);
+  } catch {
+    throw new Error("This file could not be read as an Excel workbook.");
+  }
+  const ws = wb.worksheets[0];
+  if (!ws || !/^General Ledger for\s+/i.test(text(ws.getRow(2).getCell(1).value))) {
+    throw new Error("This doesn't look like a Stessa General Ledger export.");
+  }
+  return readStessaSheet(ws);
 }
 
 export function readStessaSheet(ws: ExcelJS.Worksheet): StessaLedger {
@@ -62,8 +80,12 @@ export function readStessaSheet(ws: ExcelJS.Worksheet): StessaLedger {
     const date = `${m[3]}-${m[1]}-${m[2]}`;
     const amountCents = toCents(Number(rawAmount));
 
+    // The row's own property (not the file title), so the same transaction has the same fingerprint
+    // whether it came from a one-property file or an all-properties file.
+    const rowProperty = cell(10) || propertyName;
+
     // Identical rows (same rent every month) are legitimate, so number the repeats.
-    const base = [propertyName, date, cell(3), cell(4), cell(5), cell(6), cell(7), amountCents].join("|");
+    const base = [rowProperty, date, cell(3), cell(4), cell(5), cell(6), cell(7), amountCents].join("|");
     const n = (seen.get(base) ?? 0) + 1;
     seen.set(base, n);
 
@@ -75,12 +97,12 @@ export function readStessaSheet(ws: ExcelJS.Worksheet): StessaLedger {
       category: cell(6) || null,
       subCategory: cell(7) || null,
       amountCents,
-      property: cell(10) || propertyName,
+      property: rowProperty,
       source: cell(12),
       account: cell(13),
       dedupeHash: createHash("sha1").update(`${base}|${n}`).digest("hex"),
     });
   });
 
-  return { propertyName, rows, skippedRows: skipped };
+  return { propertyName, properties: [...new Set(rows.map((r) => r.property))], rows, skippedRows: skipped };
 }

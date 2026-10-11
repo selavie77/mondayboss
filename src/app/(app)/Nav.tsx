@@ -9,7 +9,7 @@ const items = [
   { href: "/review", label: "Review", icon: ListChecks, badge: true },
   { href: "/properties", label: "Properties", icon: Building2 },
   { href: "/categories", label: "Categories", icon: FolderTree },
-  { href: "#", label: "Import", icon: Upload, soon: true },
+  { href: "/import", label: "Import", icon: Upload },
   { href: "#", label: "Ledger", icon: BookOpen, soon: true },
   { href: "/reports", label: "Reports", icon: FileBarChart },
 ];
