@@ -14,7 +14,7 @@ const entitySchema = z.object({
 
 export async function createEntity(_prev: FormState, formData: FormData): Promise<FormState> {
   const { supabase, workspaceId } = await getSession();
-  const parsed = entitySchema.safeParse(Object.fromEntries(formData));
+  const parsed = entitySchema.safeParse({ name: formData.get("name"), type: formData.get("type") });
   if (!parsed.success) return { error: parsed.error.issues[0].message };
 
   const { data, error } = await supabase
@@ -30,7 +30,7 @@ export async function createEntity(_prev: FormState, formData: FormData): Promis
   if (seeded.error) return { error: seeded.error.message };
 
   revalidatePath("/", "layout");
-  redirect(`/onboarding?entity=${data.id}`);
+  redirect(formData.get("next") === "entities" ? "/entities" : `/onboarding?entity=${data.id}`);
 }
 
 const propertySchema = z.object({

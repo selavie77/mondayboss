@@ -20,7 +20,7 @@ export function Nav({ reviewCount = 0 }: { reviewCount?: number }) {
   return (
     <nav aria-label="Main" className="flex gap-1 overflow-x-auto px-3 pb-3 lg:flex-col lg:overflow-visible lg:pb-0">
       {items.map(({ href, label, icon: Icon, badge }) => {
-        const active = pathname.startsWith(href);
+        const active = href === "/properties" ? ["/properties", "/portfolios", "/entities"].some((p) => pathname.startsWith(p)) : pathname.startsWith(href);
         const base = "flex shrink-0 items-center gap-3 rounded-xl px-3 py-2.5 text-[15px] font-medium transition";
         return (
           <Link

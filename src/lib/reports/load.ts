@@ -3,6 +3,7 @@ import { buildBalanceSheet, buildIncomeStatement, buildNetCashFlow, buildTrialBa
 import { buildLedger, type LedgerAccount, type LedgerGroup, type LedgerLine } from "./ledger";
 import { classifyEntry, type TransactionKind } from "./transactionType";
 import { isCashLike } from "@/lib/paidFrom";
+import { bpToPercent } from "@/lib/ownership";
 import { AS_OF_REPORTS, describeRange, periodColumns, type ReportParams } from "./params";
 import type { AccountInfo, ActivityRow, Column, ReportData } from "./types";
 
@@ -14,6 +15,8 @@ interface PropertyRow {
   portfolio_id: string;
   entity_id: string;
   portfolios: { name: string } | null;
+  /** Every owner and its share, in basis points. entity_id above is the owner that keeps the books. */
+  property_owners: { entity_id: string; percent_bp: number }[];
 }
 
 /** Properties selected by the Property filter, plus a label for the report title. */
@@ -21,7 +24,7 @@ export async function selectProperties(property: string) {
   const { supabase } = await getSession();
   const { data } = await supabase
     .from("properties")
-    .select("id, name, portfolio_id, entity_id, portfolios(name)")
+    .select("id, name, portfolio_id, entity_id, portfolios(name), property_owners(entity_id, percent_bp)")
     .order("name");
   const all = (data ?? []) as unknown as PropertyRow[];
 
@@ -43,12 +46,12 @@ type ActivityResult = { bucket: string; property_id: string | null; account_id: 
 /** Read every page of the report_activity query (the API returns at most one page per call). */
 async function fetchActivity(
   supabase: SupabaseServer,
-  o: { from: string; to: string; group: string; propertyIds: string[] | null; entityIds?: string[] | null },
+  o: { from: string; to: string; group: string; propertyIds: string[] | null; entityIds?: string[] | null; allocate?: boolean },
 ): Promise<ActivityResult[]> {
   const rows: ActivityResult[] = [];
   for (let from = 0; ; from += PAGE) {
     const { data, error } = await supabase
-      .rpc("report_activity", { p_from: o.from, p_to: o.to, p_group: o.group, p_property_ids: o.propertyIds, p_entity_ids: o.entityIds ?? null })
+      .rpc("report_activity", { p_from: o.from, p_to: o.to, p_group: o.group, p_property_ids: o.propertyIds, p_entity_ids: o.entityIds ?? null, p_allocate: o.allocate ?? false })
       .range(from, from + PAGE - 1);
     if (error) throw new Error(error.message);
     rows.push(...((data ?? []) as ActivityResult[]));
@@ -87,10 +90,11 @@ export async function scopeFor(params: Pick<ReportParams, "property" | "entity">
   const allEntities = (ents ?? []) as { id: string; name: string }[];
   const entity = params.entity !== "all" ? allEntities.find((e) => e.id === params.entity) : undefined;
 
-  const selected = entity ? props.selected.filter((p) => p.entity_id === entity.id) : props.selected;
+  const owns = (p: PropertyRow, entityId: string) => p.property_owners.some((o) => o.entity_id === entityId);
+  const selected = entity ? props.selected.filter((p) => owns(p, entity.id)) : props.selected;
   let entities = entity ? [entity] : allEntities;
   if (props.filtered) {
-    const inScope = new Set(selected.map((p) => p.entity_id));
+    const inScope = new Set(selected.flatMap((p) => p.property_owners.map((o) => o.entity_id)));
     entities = entities.filter((e) => inScope.has(e.id));
   }
   const label = props.filtered ? props.label : entity ? entity.name : allEntities.length > 1 ? "All Businesses" : props.label;
@@ -105,7 +109,10 @@ export async function loadReport(params: ReportParams): Promise<ReportData> {
   const asOf = AS_OF_REPORTS.includes(params.report);
 
   const entityIds = scope.entities.map((e) => e.id);
-  const accounts = await fetchAccounts(supabase, entityIds);
+  // A co-owned property's activity is in the books of the owner that keeps them, so load every entity's accounts.
+  const accounts = await fetchAccounts(supabase, scope.allEntities.map((e) => e.id));
+  // Statements show each owner's share of a co-owned property. The trial balance shows the books as recorded.
+  const allocate = params.report !== "trial-balance";
 
   // Point-in-time reports add up everything from the beginning to the as-of date.
   const from = asOf ? "1900-01-01" : params.from;
@@ -120,7 +127,7 @@ export async function loadReport(params: ReportParams): Promise<ReportData> {
 
   const rows =
     entityIds.length > 0
-      ? await fetchActivity(supabase, { from, to: params.to, group: grouping, propertyIds: filtered ? selected.map((p) => p.id) : null, entityIds })
+      ? await fetchActivity(supabase, { from, to: params.to, group: grouping, propertyIds: filtered ? selected.map((p) => p.id) : null, entityIds, allocate })
       : [];
 
   const activity: ActivityRow[] = rows.map((r) => ({
@@ -180,7 +187,22 @@ export async function loadReport(params: ReportParams): Promise<ReportData> {
         : params.report === "trial-balance"
           ? buildTrialBalance(input)
           : buildIncomeStatement(input);
-  return { ...data, title: `${data.title} for ${label}` };
+
+  // Say so when a co-owned property is shown at an owner's share.
+  const shared = allocate ? selected.filter((p) => p.property_owners.length > 1) : [];
+  const notes = [...(data.notes ?? [])];
+  if (shared.length > 0) {
+    const entityName = new Map(scope.allEntities.map((e) => [e.id, e.name]));
+    const detail = shared
+      .slice(0, 3)
+      .map((p) => `${p.name} (${p.property_owners.map((o) => `${entityName.get(o.entity_id) ?? ""} ${bpToPercent(o.percent_bp)}%`).join(", ")})`)
+      .join("; ");
+    notes.push({
+      tone: "info",
+      text: `Co-owned properties are shown at each owner's share: ${detail}${shared.length > 3 ? `, and ${shared.length - 3} more` : ""}. Transactions are recorded in full in the books of the owner that keeps them.`,
+    });
+  }
+  return { ...data, notes, title: `${data.title} for ${label}` };
 }
 
 export interface LedgerReport {

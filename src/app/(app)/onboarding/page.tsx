@@ -13,7 +13,7 @@ export default async function OnboardingPage({ searchParams }: PageProps<"/onboa
 
   const [{ data: entities }, { data: portfolios }, { count: propertyCount }] = await Promise.all([
     supabase.from("entities").select("id, name").order("created_at"),
-    supabase.from("portfolios").select("id, name").order("created_at"),
+    supabase.from("portfolios").select("id, name, default_entity_id").order("created_at"),
     supabase.from("properties").select("id", { count: "exact", head: true }),
   ]);
 
@@ -60,7 +60,7 @@ export default async function OnboardingPage({ searchParams }: PageProps<"/onboa
         {step === 1 ? (
           <EntityForm />
         ) : (
-          <PropertyForm entities={entities ?? []} portfolios={portfolios ?? []} defaultEntityId={entity as string | undefined} />
+          <PropertyForm entities={entities ?? []} portfolios={(portfolios ?? []).map((x) => ({ id: x.id as string, name: x.name as string, defaultEntityId: x.default_entity_id as string | null }))} defaultEntityId={entity as string | undefined} />
         )}
       </Card>
     </div>
